@@ -1,12 +1,15 @@
-// ... önceki kodların devamına şunları ekle ...
-@Inject(method = "tick", at = @At("HEAD"))
-private void onTick(CallbackInfo ci) {
-    if (mc.player == null) return;
+package com.mbest700.mixin;
+import com.mbest700.Mbest700;
+import net.minecraft.client.MinecraftClient;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-    Mbest700.movement.velocity(); // Anti-Knockback
-    Mbest700.movement.autoEat();  // Otomatik Yemek
-    
-    // Combat hileleri zaten buradaydı
-    Mbest700.combat.autoCrystal();
+@Mixin(MinecraftClient.class)
+public class MinecraftClientMixin {
+    @Inject(method = "tick", at = @At("HEAD"))
+    private void onTick(CallbackInfo ci) {
+        Mbest700.onTick();
+    }
 }
-
