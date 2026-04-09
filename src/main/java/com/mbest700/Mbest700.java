@@ -1,5 +1,6 @@
 package com.mbest700;
 
+import net.fabricmc.api.ClientModInitializer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
@@ -13,57 +14,64 @@ import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.math.BlockPos;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.*;
 
-public class Mbest700 {
+public class Mbest700 implements ClientModInitializer {
     public static final MinecraftClient mc = MinecraftClient.getInstance();
     public static Map<String, Module> moduleMap = new LinkedHashMap<>();
     private static long lastCrystalTime = 0;
 
+    @Override
+    public void onInitializeClient() {
+        init();
+        System.out.println("Mbest700 Client Aktif - Right Shift ile Menüyü Aç!");
+    }
+
     public static void init() {
-        // --- CPVP MODÜLLERİ ---
-        addMod(new Module("AutoCrystal", GLFW.GLFW_KEY_C, 15.0)); // Default 15 bps
+        // --- MODÜLLERİ KAYDET ---
+        addMod(new Module("AutoCrystal", GLFW.GLFW_KEY_C, 16.0)); 
         addMod(new Module("AutoAnchor", GLFW.GLFW_KEY_V, 0));
-        addMod(new Module("SmartTotem", 0, 1.0)); // 1=Aktif
+        addMod(new Module("SmartTotem", 0, 1.0));
         addMod(new Module("Surround", GLFW.GLFW_KEY_X, 0));
-
-        // --- BASE ARAMA & GÖRSEL ---
-        addMod(new Module("StorageESP", 0, 100.0)); // 100 blok ötedeki sandıkları tarar
-        addMod(new Module("HoleESP", 0, 10.0));    // Etraftaki güvenli delikleri tarar
-        addMod(new Module("XRay", GLFW.GLFW_KEY_O, 0));
-        addMod(new Module("Tracer", 0, 0));        // Oyunculara çizgi çeker
-
-        // --- COMBAT & LEGIT ---
-        addMod(new Module("Reach", 0, 4.2));       // Özelleştirilebilir Menzil
-        addMod(new Module("Velocity", 0, 0.0));    // Anti-Knockback (0=Sıfır savrulma)
+        addMod(new Module("Reach", 0, 4.2));
+        addMod(new Module("Velocity", 0, 0.0));
         addMod(new Module("ShieldCracker", 0, 0));
-        addMod(new Module("AutoEat", 0, 14.0));    // 14 açlık seviyesinde yer
+        addMod(new Module("AutoEat", 0, 14.0));
+        addMod(new Module("StorageESP", 0, 50.0));
     }
 
     private static void addMod(Module m) { moduleMap.put(m.name, m); }
 
+    // --- ANA DÖNGÜ (TICK) ---
     public static void onTick() {
-        if (mc.player == null) return;
+        if (mc.player == null || mc.world == null) return;
 
         if (getMod("SmartTotem").enabled) doSmartTotem();
         if (getMod("AutoCrystal").enabled) doAutoCrystal();
-        if (getMod("Velocity").enabled && mc.player.hurtTime > 0) mc.player.setVelocity(0, mc.player.getVelocity().y, 0);
+        if (getMod("Velocity").enabled && mc.player.hurtTime > 0) {
+            mc.player.setVelocity(0, mc.player.getVelocity().y, 0);
+        }
         if (getMod("AutoEat").enabled) doAutoEat();
         if (getMod("ShieldCracker").enabled) doShieldCracker();
-        if (getMod("StorageESP").enabled) doStorageSearch(); // Base avcı sistemi
     }
 
-    // --- ÖZEL CPVP & ANTI-CHEAT KONTROLLERİ ---
+    // --- TUŞ DÖNGÜSÜ ---
+    public static void onKey(int key) {
+        if (key == GLFW.GLFW_KEY_RIGHT_SHIFT) {
+            mc.setScreen(new ClickGui());
+        }
+        if (key == GLFW.GLFW_KEY_V && getMod("AutoAnchor").enabled) {
+            doAutoAnchor();
+        }
+    }
+
+    // --- HİLE MANTIKLARI ---
     private static void doAutoCrystal() {
         Module m = getMod("AutoCrystal");
-        // Anti-Cheat Delay (Saniyede kaç patlatma? m.val kadar)
-        long delay = (long) (1000 / m.val) + new Random().nextInt(20); // Gecikmeye rastgelelik ekle (Bypass için)
-
+        long delay = (long) (1000 / m.val) + new Random().nextInt(15);
         if (System.currentTimeMillis() - lastCrystalTime < delay) return;
-        if (!mc.player.getMainHandStack().isOf(Items.END_CRYSTAL) && !mc.options.useKey.isPressed()) return;
 
         mc.world.getEntities().forEach(e -> {
             if (e instanceof EndCrystalEntity crystal && mc.player.canSee(e) && mc.player.distanceTo(crystal) < getMod("Reach").val) {
@@ -72,14 +80,6 @@ public class Mbest700 {
                 lastCrystalTime = System.currentTimeMillis();
             }
         });
-    }
-
-    private static void doStorageSearch() {
-        // Yeraltı base araması: Sandıkları tarar ve chat'ten koordinat verir
-        // Gerçek ESP için MixinRenderer gerekir, bu mantıksal tarama yapar.
-        int range = (int) getMod("StorageESP").val;
-        BlockPos playerPos = mc.player.getBlockPos();
-        // Basit bir tarama algoritması (Performans için her tick sadece küçük bir alanı tarar)
     }
 
     private static void doSmartTotem() {
@@ -96,79 +96,85 @@ public class Mbest700 {
         if (!(hit instanceof BlockHitResult bHit)) return;
         int anc = findItem(Items.RESPAWN_ANCHOR);
         int glow = findItem(Items.GLOWSTONE);
-
         if (anc != -1 && glow != -1) {
             mc.player.getInventory().selectedSlot = anc;
             mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bHit);
             mc.player.getInventory().selectedSlot = glow;
-            mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bHit); // Doldur
-            mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bHit); // Patlat
+            mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bHit);
+            mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bHit);
         }
     }
 
-    // --- YARDIMCI METOTLAR ---
+    private static void doShieldCracker() {
+        if (mc.targetedEntity instanceof PlayerEntity target && target.isUsingShield()) {
+            for (int i = 0; i < 9; i++) {
+                if (mc.player.getInventory().getStack(i).getItem() instanceof AxeItem) {
+                    mc.player.getInventory().selectedSlot = i;
+                    mc.interactionManager.attackEntity(mc.player, target);
+                    break;
+                }
+            }
+        }
+    }
+
+    private static void doAutoEat() {
+        if (mc.player.getHungerManager().getFoodLevel() <= getMod("AutoEat").val) {
+            for (int i = 0; i < 9; i++) {
+                if (mc.player.getInventory().getStack(i).isFood()) {
+                    mc.player.getInventory().selectedSlot = i;
+                    mc.options.useKey.setPressed(true);
+                    return;
+                }
+            }
+        }
+    }
+
+    // --- YARDIMCI SİSTEMLER ---
     public static Module getMod(String name) { return moduleMap.get(name); }
     private static int findItem(net.minecraft.item.Item item) {
         for (int i = 0; i < 36; i++) if (mc.player.getInventory().getStack(i).isOf(item)) return i;
         return -1;
     }
 
-    public static void onKey(int key) {
-        if (key == GLFW.GLFW_KEY_RIGHT_SHIFT) mc.setScreen(new ClickGui());
-        if (key == GLFW.GLFW_KEY_V && getMod("AutoAnchor").enabled) doAutoAnchor();
-    }
-
-    // --- MODÜL VE AYAR YAPISI ---
     public static class Module {
         public String name;
         public int key;
         public boolean enabled = false;
-        public double val; // CUSTOMIZABLE VALUE (Hız, Menzil, Mesafe vb.)
-
+        public double val;
         public Module(String name, int key, double val) {
             this.name = name; this.key = key; this.val = val;
         }
         public void toggle() { this.enabled = !this.enabled; }
     }
 
-    // --- GELİŞMİŞ CUSTOMIZABLE MENU ---
+    // --- CLICK GUI ---
     public static class ClickGui extends Screen {
-        public ClickGui() { super(Text.literal("Mbest700 Custom")); }
-        
+        public ClickGui() { super(Text.literal("Mbest700 Menu")); }
         @Override
         public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-            context.fill(20, 20, 240, 320, 0xDD000000); // Koyu şık panel
-            context.drawText(this.textRenderer, "§6§lMBEST700 HYBRID §7| 1.21.4", 30, 30, 0xFFFFFF, true);
-            
-            int y = 50;
+            context.fill(20, 20, 240, 300, 0xDD000000);
+            context.drawText(this.textRenderer, "§b§lMBEST700 CLIENT", 30, 30, 0xFFFFFF, true);
+            int y = 55;
             for (Module m : moduleMap.values()) {
-                String status = m.enabled ? "§a[ON]" : "§c[OFF]";
-                String valueInfo = m.val > 0 ? " §e(" + m.val + ")" : "";
-                context.drawText(this.textRenderer, status + " §f" + m.name + valueInfo, 30, y, 0xFFFFFF, false);
-                y += 15;
+                String color = m.enabled ? "§a" : "§c";
+                context.drawText(this.textRenderer, color + m.name + " §7(" + m.val + ")", 30, y, 0xFFFFFF, false);
+                y += 18;
             }
-            context.drawText(this.textRenderer, "§7(Sol Tık: Toggle | Sağ Tık: Değer Artır)", 30, 305, 0xAAAAAA, false);
             super.render(context, mouseX, mouseY, delta);
         }
-
         @Override
         public boolean mouseClicked(double mouseX, double mouseY, int button) {
-            int y = 50;
+            int y = 55;
             for (Module m : moduleMap.values()) {
-                if (mouseX > 30 && mouseX < 200 && mouseY > y && mouseY < y + 12) {
-                    if (button == 0) m.toggle(); // Sol tık aç/kapat
-                    if (button == 1) { // Sağ tık değeri artır (Customizable!)
-                        m.val = (m.val >= 20) ? 1 : m.val + 1;
-                        if (m.name.equals("Reach") && m.val > 6) m.val = 3; // Menzil sınırı
-                    }
+                if (mouseX > 30 && mouseX < 200 && mouseY > y && mouseY < y + 15) {
+                    if (button == 0) m.toggle();
+                    if (button == 1) m.val = (m.val >= 20) ? 1 : m.val + 1;
                     return true;
                 }
-                y += 15;
+                y += 18;
             }
             return super.mouseClicked(mouseX, mouseY, button);
         }
+        @Override public boolean shouldPause() { return false; }
     }
-
-    private static void doAutoEat() { /* Önceki mesajdaki mantık geçerli */ }
-    private static void doShieldCracker() { /* Önceki mesajdaki mantık geçerli */ }
-                }
+}
