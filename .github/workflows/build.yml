@@ -1,4 +1,4 @@
-name: Build Mbest700
+name: Build
 on: [push]
 jobs:
   build:
@@ -10,11 +10,11 @@ jobs:
         with:
           java-version: '21'
           distribution: 'temurin'
-      - name: Build with Gradle
+      - name: Build
         run: |
           chmod +x gradlew
           ./gradlew build
-      - name: Upload Jar
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: Mbest700-1.21.4
