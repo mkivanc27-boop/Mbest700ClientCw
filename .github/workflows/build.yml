@@ -1,4 +1,4 @@
-name: Build
+name: Mbest700-Jar-Uretici
 on: [push]
 jobs:
   build:
@@ -10,13 +10,16 @@ jobs:
         with:
           java-version: '21'
           distribution: 'temurin'
-      - name: Build
-        run: |
-          chmod +x gradlew
-          ./gradlew build
-      - name: Upload
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Build with Gradle
+        run: gradle build # 'gradlew' yerine direkt 'gradle' kullanıyoruz
+        
+      - name: Jar-Dosyasini-Ver
         uses: actions/upload-artifact@v4
         with:
-          name: Mbest700-1.21.4
+          name: Mbest700-Client-1.21.4
           path: build/libs/*.jar
           
