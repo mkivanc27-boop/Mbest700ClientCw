@@ -13,11 +13,9 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
-          gradle-version: 8.8 # Daha uyumlu bir sürüm seçtik
-      - name: Build
-        run: |
-          chmod +x gradlew
-          ./gradlew build
+          gradle-version: 8.8
+      - name: Build with Gradle
+        run: gradle build  # './gradlew' yerine direkt 'gradle' komutunu kullanıyoruz
       - name: Jar-Dosyasini-Ver
         uses: actions/upload-artifact@v4
         with:
