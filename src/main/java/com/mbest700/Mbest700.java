@@ -8,6 +8,7 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.decoration.EndCrystalEntity;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.component.DataComponentTypes;
 import net.minecraft.item.*;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.text.Text;
@@ -390,8 +391,9 @@ public class Mbest700 implements ClientModInitializer {
             ItemStack stack = mc.player.getInventory().getStack(i);
             // 1.21.4: food check via item components
             if (stack.isEmpty()) continue;
-            if (stack.getItem().getFoodComponent() != null) return i;
+            if (stack.contains(DataComponentTypes.FOOD)) return i;
         }
         return -1;
     }
     }
+        
