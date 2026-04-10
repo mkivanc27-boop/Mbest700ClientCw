@@ -149,7 +149,6 @@ public class Mbest700 implements ClientModInitializer {
         @Override
         public boolean shouldCloseOnEsc() { return true; }
 
-        @Override
         public boolean isPauseScreen() { return false; }
     }
 
@@ -214,7 +213,8 @@ public class Mbest700 implements ClientModInitializer {
     // ─────────────────────────────────────────────────────────────
     // Called by KeyboardMixin on every key event
     // ─────────────────────────────────────────────────────────────
-    public static void onKey(int key) {
+    public static void onKey(int key, int action) {
+        if (action != 1) return; // 1 = GLFW_PRESS, ignore RELEASE and REPEAT
         // GLFW key R = 82  → open / close the GUI
         if (key == 82) {
             if (mc.currentScreen instanceof MeteorGui) {
@@ -388,10 +388,9 @@ public class Mbest700 implements ClientModInitializer {
     private static int findFood() {
         for (int i = 0; i < mc.player.getInventory().size(); i++) {
             ItemStack stack = mc.player.getInventory().getStack(i);
-            if (stack.getItem() instanceof Item fi) {
-                // FoodComponent check — works for 1.21.4
-                if (stack.isFood()) return i;
-            }
+            // 1.21.4: food check via item components
+            if (stack.isEmpty()) continue;
+            if (stack.getItem().getFoodComponent() != null) return i;
         }
         return -1;
     }
