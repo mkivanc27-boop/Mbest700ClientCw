@@ -1,110 +1,100 @@
 package com.mbest700;
 
-import net.fabricmc.api.ModInitializer;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.text.Text;
-import org.lwjgl.glfw.GLFW;
+import net.minecraft.item.Items;
+import net.minecraft.util.Hand;
+import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Mbest700 Client - Core Module
- * Fixes: Auto-spam, Anchor delay, Shield Cracker logic, Menu Access
- */
-public class Mbest700 implements ModInitializer {
+public class Mbest700 {
     public static final String MOD_ID = "mbest700";
-    public static final List<Module> modules = new ArrayList<>();
     public static final MinecraftClient mc = MinecraftClient.getInstance();
 
-    @Override
-    public void onInitialize() {
-        // Modülleri Sisteme Kaydet (Customizable Değerlerle)
-        modules.add(new Module("Auto Anchor", GLFW.GLFW_KEY_V, "Anchor koyar, doldurur ve gecikmeli patlatır.")
-                .addSetting("Delay", 0.15) // Bekleme süresi eklendi
-                .addSetting("AutoFill", 1.0));
+    // MODÜL AYARLARI (Customizable)
+    public static class Settings {
+        // AutoAnchor
+        public static boolean autoAnchorEnabled = false;
+        public static int anchorDelay = 2; // Tick bazlı bekleme süresi
         
-        modules.add(new Module("Shield Cracker", GLFW.GLFW_KEY_G, "Kalkanı kırınca otomatik eski eşyaya geçer."));
+        // ShieldCracker
+        public static boolean shieldCrackerEnabled = false;
+        public static boolean autoSwapBack = true; // Kalkan kırınca eski eşyaya geç
         
-        modules.add(new Module("Reach", GLFW.GLFW_KEY_R, "Vuruş mesafesini artırır.")
-                .addSetting("Distance", 3.5));
+        // Reach
+        public static float reachDistance = 4.5f;
 
-        System.out.println("[Mbest700] Client başarıyla yüklendi. Menü: RIGHT_SHIFT");
+        // Yeni Hileler
+        public static boolean autoClicker = false;
+        public static boolean noVelocity = false;
     }
 
-    // --- MODÜL SİSTEMİ (Spam Engelleme ve Ayar Altyapısı) ---
-    public static class Module {
-        public String name;
-        public int key;
-        public boolean toggled = false;
-        public String description;
-        public double currentDelay = 0.0; // İç sayaç
+    public static void onTick() {
+        if (mc.player == null || mc.world == null) return;
 
-        // Ayarlar için basit bir liste (Customizable olması için)
-        public double settingValue = 0.0;
+        runAutoAnchor();
+        runShieldCracker();
+        runReachHack();
+    }
 
-        public Module(String name, int key, String description) {
-            this.name = name;
-            this.key = key;
-            this.description = description;
+    // --- FIX: AUTO ANCHOR (BEKLEME SÜRELİ) ---
+    private static int anchorTimer = 0;
+    private static void runAutoAnchor() {
+        if (!Settings.autoAnchorEnabled) return;
+
+        if (anchorTimer > 0) {
+            anchorTimer--;
+            return;
         }
 
-        public Module addSetting(String label, double defaultValue) {
-            this.settingValue = defaultValue;
-            return this;
-        }
-
-        public void toggle() {
-            this.toggled = !this.toggled;
-            if (mc.player != null) {
-                String state = toggled ? "§aAÇIK" : "§cKAPALI";
-                mc.player.sendMessage(Text.literal("§8[§bMbest700§8] §f" + name + " " + state), true);
+        BlockHitResult hit = (BlockHitResult) mc.crosshairTarget;
+        if (hit != null) {
+            BlockPos pos = hit.getBlockPos();
+            
+            // Eğer elimizde Anchor varsa koy, Glowstone varsa doldur ve patlat
+            if (mc.player.getMainHandStack().isOf(Items.RESPAWN_ANCHOR)) {
+                mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, hit);
+                anchorTimer = Settings.anchorDelay; // Bekleme süresi eklendi
+            } else if (mc.player.getMainHandStack().isOf(Items.GLOWSTONE)) {
+                mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, hit);
+                anchorTimer = Settings.anchorDelay;
             }
         }
     }
 
-    // --- METEOR TARZI CUSTOMIZABLE MENU ---
-    public static class MeteorGui extends Screen {
-        public MeteorGui() {
-            super(Text.literal("Mbest700 Menu"));
-        }
+    // --- FIX: SHIELD CRACKER (AKILLI DURDURMA) ---
+    private static void runShieldCracker() {
+        if (!Settings.shieldCrackerEnabled) return;
 
-        @Override
-        public void render(net.minecraft.client.util.math.MatrixStack matrices, int mouseX, int mouseY, float delta) {
-            this.renderBackground(matrices);
-            int y = 30;
-            
-            drawCenteredText(matrices, this.textRenderer, "§b§lMBEST700 §f§nCUSTOMIZER", this.width / 2, 10, 0xFFFFFF);
-
-            for (Module mod : modules) {
-                int color = mod.toggled ? 0x00FF00 : 0xFFFFFF;
-                String status = mod.toggled ? "[ON]" : "[OFF]";
-                
-                // Modül İsmi ve Durumu
-                this.textRenderer.draw(matrices, "§7> §f" + mod.name + " §r" + status, 20, y, color);
-                
-                // Ayarları Göster (Customizable kısmı)
-                if (mod.settingValue > 0) {
-                    this.textRenderer.draw(matrices, "§8└─ Val: " + mod.settingValue, 130, y, 0xAAAAAA);
+        if (mc.targetedEntity instanceof net.minecraft.entity.LivingEntity target) {
+            // Sadece rakip kalkan kullanıyorsa çalış
+            if (target.isUsingItem() && target.getActiveItem().isOf(Items.SHIELD)) {
+                if (mc.player.getMainHandStack().isOf(Items.NETHERITE_AXE) || mc.player.getMainHandStack().isOf(Items.DIAMOND_AXE)) {
+                    mc.interactionManager.attackEntity(mc.player, target);
+                    mc.player.swingHand(Hand.MAIN_HAND);
                 }
-                
-                y += 14;
+            } else if (Settings.autoSwapBack) {
+                // Kalkan kırıldıysa kılıca veya önceki slota geç (Örnek: 1. slot)
+                mc.player.getInventory().selectedSlot = 0; 
             }
-            
-            this.textRenderer.draw(matrices, "§8[ESC] Kapat | [R-SHIFT] Menü", 10, this.height - 15, 0x555555);
-            super.render(matrices, mouseX, mouseY, delta);
         }
+    }
 
-        @Override
-        public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-            if (keyCode == GLFW.GLFW_KEY_ESCAPE || keyCode == GLFW.GLFW_KEY_RIGHT_SHIFT) {
-                this.close();
-                return true;
+    // --- REACH HACK ---
+    private static void runReachHack() {
+        // Bu kısım MixinPlayerEntity içinde 'Settings.reachDistance' değişkenini kullanacak şekilde ayarlanmıştır.
+    }
+
+    // --- METEOR STYLE GUI KONTROLÜ ---
+    public static class MeteorGui {
+        public static void toggleModule(String name) {
+            switch (name.toLowerCase()) {
+                case "autoanchor" -> Settings.autoAnchorEnabled = !Settings.autoAnchorEnabled;
+                case "shieldcracker" -> Settings.shieldCrackerEnabled = !Settings.shieldCrackerEnabled;
+                case "reach" -> Settings.reachDistance = (Settings.reachDistance == 4.5f) ? 3.0f : 4.5f;
             }
-            return super.keyPressed(keyCode, scanCode, modifiers);
         }
-
-        @Override
-        public boolean shouldPause() { return false; } // Menü açıkken oyun durmasın
     }
 }
