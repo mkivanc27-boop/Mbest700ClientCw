@@ -36,8 +36,9 @@ public class Mbest700 implements ClientModInitializer {
     }
 
     public static void init() {
+        // Modüller ve Ayarlar
         addMod(new Module("AutoAnchor", "Combat").addSetting("Delay", 30.0, 5.0, 200.0));
-        addMod(new Module("AutoCrystal", "Combat").addSetting("Speed", 15.0, 1.0, 20.0));
+        addMod(new Module("AutoCrystal", "Combat").addSetting("Speed", 15.0, 1.0, 30.0));
         addMod(new Module("TriggerBot", "Combat")); 
         addMod(new Module("ShieldCracker", "Combat"));
         addMod(new Module("AutoSwordHit", "Combat").addSetting("Range", 3.8, 2.0, 6.0));
@@ -68,20 +69,20 @@ public class Mbest700 implements ClientModInitializer {
         if (anchorStep != -1) doLockedAnchor();
     }
 
-    // --- AUTO CRYSTAL: SAĞ TIK BASILI TUTUNCA KOY-PATLAT ---
+    // --- AUTO CRYSTAL: SAĞ TIK BASILIYKEN KOY-PATLAT ---
     private static void doAutoCrystal() {
-        if (!mc.options.useKey.isPressed()) return; // Sağ tık basılı değilse çalışma
+        if (!mc.options.useKey.isPressed()) return; // Sağ tık basılı değilse dur
 
-        double interval = 1000.0 / getMod("AutoCrystal").getSetting("Speed").val;
-        if (System.currentTimeMillis() - crystalTimer < interval) return;
+        double speed = getMod("AutoCrystal").getSetting("Speed").val;
+        if (System.currentTimeMillis() - crystalTimer < (1000 / speed)) return;
 
-        // 1. Patlatma (Etraftaki kristallere vur)
+        // 1. Patlatma (Kristale bakıyorsan vur)
         if (mc.crosshairTarget instanceof EntityHitResult ehr && ehr.getEntity() instanceof EndCrystalEntity crystal) {
             mc.interactionManager.attackEntity(mc.player, crystal);
             mc.player.swingHand(Hand.MAIN_HAND);
             crystalTimer = System.currentTimeMillis();
         } 
-        // 2. Koyma (Obsidiyene bakıyorsan)
+        // 2. Koyma (Obsidiyene bakıyorsan kristal koy)
         else if (mc.crosshairTarget instanceof BlockHitResult bhr) {
             int crySlot = findItemHotbar(Items.END_CRYSTAL);
             if (crySlot != -1) {
@@ -96,6 +97,7 @@ public class Mbest700 implements ClientModInitializer {
 
     private static void doTriggerBot() {
         if (mc.crosshairTarget instanceof EntityHitResult ehr && ehr.getEntity() instanceof PlayerEntity target) {
+            // Sadece saldırı barı dolduğunda vurur (spam engellendi)
             if (target != mc.player && target.isAlive() && mc.player.getAttackCooldownProgress(0.5f) >= 1.0f) {
                 mc.interactionManager.attackEntity(mc.player, target);
                 mc.player.swingHand(Hand.MAIN_HAND);
@@ -107,7 +109,7 @@ public class Mbest700 implements ClientModInitializer {
         if (targetAnchorPos == null) return;
         Vec3d center = Vec3d.ofCenter(targetAnchorPos);
         float[] rots = getRotations(center);
-        // Paket Constructor Fix
+        // Paket hatası fixlendi
         mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(rots[0], rots[1], mc.player.isOnGround(), true));
 
         int anc = findItemHotbar(Items.RESPAWN_ANCHOR);
@@ -121,14 +123,14 @@ public class Mbest700 implements ClientModInitializer {
         switch (anchorStep) {
             case 0: mc.player.getInventory().selectedSlot = anc; mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bhr); anchorTimer = now; anchorStep = 1; break;
             case 1: if (now - anchorTimer >= delay) { mc.player.getInventory().selectedSlot = glow; mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bhr); anchorTimer = now; anchorStep = 2; } break;
-            case 2: if (now - anchorTimer >= delay) { mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bhr); anchorStep = -1; } break;
+            case 2: if (now - anchorTimer >= delay) { mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bhr); anchorStep = -1; targetAnchorPos = null; } break;
         }
     }
 
     private static void doShieldCracker() {
-        if (System.currentTimeMillis() - shieldTimer < 250) return; // Fix
+        if (System.currentTimeMillis() - shieldTimer < 250) return;
         for (Entity e : mc.world.getEntities()) {
-            if (e instanceof PlayerEntity target && target != mc.player && target.isBlocking()) { // Fix
+            if (e instanceof PlayerEntity target && target != mc.player && target.isBlocking()) { // isUsingShield Fix
                 int axe = findAxe();
                 if (axe != -1 && mc.player.distanceTo(target) < 4.0) {
                     mc.player.getInventory().selectedSlot = axe;
@@ -140,7 +142,7 @@ public class Mbest700 implements ClientModInitializer {
     }
 
     private static void doFastXP() {
-        if (mc.options.useKey.isPressed() && mc.player.getMainHandStack().isOf(Items.EXPERIENCE_BOTTLE)) { // Fix
+        if (mc.options.useKey.isPressed() && mc.player.getMainHandStack().isOf(Items.EXPERIENCE_BOTTLE)) { // Yazım hatası fix
             if (System.currentTimeMillis() - xpTimer >= (1000 / getMod("FastXP").getSetting("Speed").val)) {
                 mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
                 xpTimer = System.currentTimeMillis();
@@ -175,36 +177,41 @@ public class Mbest700 implements ClientModInitializer {
         }
     }
 
-    // --- ÖZELLEŞTİRME MENÜSÜ FIX (SOL/SAĞ TIK) ---
+    // --- ÖZELLEŞTİRİLEBİLİR MENÜ (FIX) ---
     public static class AmethystGui extends Screen {
         private String selectedMod = "";
         public AmethystGui() { super(Text.literal("Amethyst")); }
+
         @Override
         public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-            context.fill(10, 10, 220, 320, 0xEE050505);
-            context.drawText(this.textRenderer, "§dMbest700 §fV20", 20, 20, 0xFFFFFF, true);
+            context.fill(10, 10, 230, 320, 0xEE050505);
+            context.drawText(this.textRenderer, "§dMbest700 §fV21", 20, 20, 0xFFFFFF, true);
             int y = 45;
             for (Module m : moduleMap.values()) {
                 context.fill(20, y, 24, y + 10, m.enabled ? 0xFF9933FF : 0xFF444444);
                 context.drawText(this.textRenderer, (m.name.equals(selectedMod) ? "§e> " : "§f") + m.name, 30, y + 1, 0xFFFFFF, false);
+                
                 if (m.name.equals(selectedMod)) {
                     for (Setting s : m.settings.values()) {
                         y += 15;
-                        context.drawText(this.textRenderer, "  " + s.name + ": " + String.format("%.1f", s.val), 40, y, 0xAAAAAA, false);
+                        context.drawText(this.textRenderer, "  " + s.name + ": §b" + String.format("%.1f", s.val), 40, y, 0xAAAAAA, false);
                     }
                 }
                 y += 18;
             }
         }
+
         @Override
         public boolean mouseClicked(double mouseX, double mouseY, int button) {
             int y = 45;
             for (Module m : moduleMap.values()) {
+                // Modül Seçme/Açma
                 if (mouseX > 20 && mouseX < 200 && mouseY > y && mouseY < y + 15) {
                     if (button == 0) m.toggle(); // Sol tık: Aç/Kapat
                     else selectedMod = m.name; // Sağ tık: Ayarları göster
                     return true;
                 }
+                // Ayar Değiştirme
                 if (m.name.equals(selectedMod)) {
                     for (Setting s : m.settings.values()) {
                         y += 15;
@@ -251,5 +258,4 @@ public class Mbest700 implements ClientModInitializer {
         public String name; public double val, min, max;
         public Setting(String n, double v, double min, double max) { name = n; val = v; this.min = min; this.max = max; }
     }
-    }
-                    
+                                 }
