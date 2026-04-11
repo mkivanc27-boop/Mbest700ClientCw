@@ -4,9 +4,11 @@ import net.fabricmc.api.ClientModInitializer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.entity.Entity;
 import net.minecraft.entity.decoration.EndCrystalEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.AxeItem;
+import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
@@ -33,11 +35,10 @@ public class Mbest700 implements ClientModInitializer {
     }
 
     public static void init() {
-        // --- TÜM MODÜLLER (Eksiksiz Liste) ---
         addMod(new Module("AutoCrystal", "Combat").addSetting("Speed", 45.0, 1.0, 100.0));
         addMod(new Module("AutoAnchor", "Combat").addSetting("Delay", 30.0, 5.0, 200.0));
         addMod(new Module("ShieldCracker", "Combat"));
-        addMod(new Module("AutoSwordHit", "Combat").addSetting("LookTime", 0.5, 0.1, 2.0));
+        addMod(new Module("AutoSwordHit", "Combat"));
         addMod(new Module("Velocity", "Combat").addSetting("Reduce", 100.0, 0.0, 100.0));
         addMod(new Module("SmartTotem", "Player"));
         addMod(new Module("FastXP", "Player").addSetting("Speed", 20.0, 1.0, 20.0));
@@ -50,49 +51,43 @@ public class Mbest700 implements ClientModInitializer {
     public static void onTick() {
         if (mc.player == null || mc.world == null) return;
 
-        // Render & Utility
         if (getMod("FullBright").enabled) mc.options.getGamma().setValue(100.0);
 
-        // Smart Totem (Sessiz Çekim)
         if (getMod("SmartTotem").enabled && !mc.player.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING)) {
             int slot = findTotemAnywhere();
             if (slot != -1) mc.interactionManager.clickSlot(0, slot, 45, SlotActionType.SWAP, mc.player);
         }
 
-        // Combat İşlemleri
         if (getMod("FastXP").enabled) doFastXP();
         if (getMod("AutoCrystal").enabled) doAutoCrystal();
         if (getMod("ShieldCracker").enabled) doShieldCracker();
         if (getMod("AutoSwordHit").enabled) doAutoSwordHit();
         if (anchorStep != -1) doLockedAnchor();
 
-        // Velocity (Anti-Knockback)
         if (getMod("Velocity").enabled && mc.player.hurtTime > 0) {
-            double reduce = getMod("Velocity").getSetting("Reduce").val / 100.0;
-            mc.player.setVelocity(mc.player.getVelocity().multiply(reduce, 1.0, reduce));
+            double red = getMod("Velocity").getSetting("Reduce").val / 100.0;
+            mc.player.setVelocity(mc.player.getVelocity().multiply(red, 1.0, red));
         }
     }
 
-    // --- ÖNCEDEN KALDIRILMAMIŞ KRİTİK ÖZELLİKLER ---
-
     private static void doShieldCracker() {
-        if (System.currentTimeMillis() - shieldTimer < 200) return;
-        mc.world.getEntities().forEach(e -> {
-            if (e instanceof PlayerEntity target && target != mc.player && target.isUsingShield()) {
+        if (System.currentTimeMillis() - shieldTimer < 250) return;
+        for (Entity e : mc.world.getEntities()) {
+            if (e instanceof PlayerEntity target && target != mc.player && target.isBlocking()) { // FIX: isUsingShield yerine isBlocking
                 int axe = findAxe();
-                if (axe != -1) {
+                if (axe != -1 && mc.player.distanceTo(target) < 4.0) {
                     mc.player.getInventory().selectedSlot = axe;
                     mc.interactionManager.attackEntity(mc.player, target);
                     shieldTimer = System.currentTimeMillis();
                 }
             }
-        });
+        }
     }
 
     private static void doAutoSwordHit() {
-        if (System.currentTimeMillis() - swordTimer < 500) return;
-        mc.world.getEntities().forEach(e -> {
-            if (e instanceof PlayerEntity target && target != mc.player && mc.player.distanceTo(target) < 3.5) {
+        if (System.currentTimeMillis() - swordTimer < 550) return;
+        for (Entity e : mc.world.getEntities()) {
+            if (e instanceof PlayerEntity target && target != mc.player && mc.player.distanceTo(target) < 3.8) {
                 int sword = findItemHotbar(Items.NETHERITE_SWORD);
                 if (sword != -1) {
                     mc.player.getInventory().selectedSlot = sword;
@@ -100,14 +95,14 @@ public class Mbest700 implements ClientModInitializer {
                     swordTimer = System.currentTimeMillis();
                 }
             }
-        });
+        }
     }
 
     private static void doLockedAnchor() {
         if (targetAnchorPos == null) { anchorStep = -1; return; }
         Vec3d center = Vec3d.ofCenter(targetAnchorPos);
         float[] rots = getRotations(center);
-        // Hata Fix: 4 Parametreli Paket
+        // FIX: 4 Parametreli Paket Hatası Giderildi
         mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(rots[0], rots[1], mc.player.isOnGround(), true));
 
         int anc = findItemHotbar(Items.RESPAWN_ANCHOR);
@@ -155,7 +150,6 @@ public class Mbest700 implements ClientModInitializer {
         }
     }
 
-    // --- GELİŞMİŞ MENÜ (SAĞ TIK ÖZELLİKLİ) ---
     public static class AmethystGui extends Screen {
         private String selectedMod = "";
         private float fade = 0;
@@ -165,7 +159,7 @@ public class Mbest700 implements ClientModInitializer {
         public void render(DrawContext context, int mouseX, int mouseY, float delta) {
             fade = Math.min(fade + 0.1f, 1.0f);
             context.fill(10, 10, 210, 280, (int)(0xDD * fade) << 24 | 0x050505);
-            context.drawText(this.textRenderer, "§dAmethyst ULTIMATE §fV11", 20, 20, 0xFFFFFF, true);
+            context.drawText(this.textRenderer, "§dMbest700 §fV11", 20, 20, 0xFFFFFF, true);
             int x = 20; int y = 40;
             for (Module m : moduleMap.values()) {
                 int baseCol = m.enabled ? 0xFF9933FF : 0xFF444444;
@@ -174,7 +168,7 @@ public class Mbest700 implements ClientModInitializer {
                 if (m.name.equals(selectedMod)) {
                     for (Setting s : m.settings.values()) {
                         y += 15;
-                        context.drawText(this.textRenderer, " §b> " + s.name + ": §f" + String.format("%.1f", s.val), x + 15, y, 0xBBBBBB, false);
+                        context.drawText(this.textRenderer, " > " + s.name + ": " + String.format("%.1f", s.val), x + 15, y, 0xBBBBBB, false);
                     }
                 }
                 y += 18;
@@ -205,7 +199,6 @@ public class Mbest700 implements ClientModInitializer {
         }
     }
 
-    // --- YARDIMCI ARAÇLAR ---
     private static int findTotemAnywhere() {
         for (int i = 0; i < 45; i++) if (mc.player.getInventory().getStack(i).isOf(Items.TOTEM_OF_UNDYING)) return i < 9 ? i + 36 : i;
         return -1;
@@ -237,4 +230,5 @@ public class Mbest700 implements ClientModInitializer {
         public String name; public double val, min, max;
         public Setting(String n, double v, double min, double max) { name = n; val = v; this.min = min; this.max = max; }
     }
-    }
+            }
+        
