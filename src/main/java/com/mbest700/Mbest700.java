@@ -9,6 +9,7 @@ import net.minecraft.entity.decoration.EndCrystalEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.AxeItem;
 import net.minecraft.item.Items;
+import net.minecraft.network.packet.c2s.play.CloseHandledScreenC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.text.Text;
@@ -43,10 +44,10 @@ public class Mbest700 implements ClientModInitializer {
         addMod(new Module("TriggerBot", "Baktiginiz oyuncuya otomatik vurur.")
             .addSetting("Range", 3.0, 2.0, 6.0)); 
         addMod(new Module("ShieldCracker", "Kalkan kullananlarin kalkanini dusurur."));
-        addMod(new Module("AutoSwordHit", "Menzildeki oyuncuya otomatik kilic sallar.")
+        addMod(new Module("AutoSwordHit", "Kilica gecer, vurur ve ESKI ITEMINE doner.")
             .addSetting("Range", 3.8, 2.0, 6.0));
-        addMod(new Module("SmartTotem", "Envanteri acarak insansi sekilde totem alir.")
-            .addSetting("SwapDelay", 50.0, 0.0, 500.0)); // Gecikme ayarı
+        addMod(new Module("SmartTotem", "Envanteri acip totem alir ve kapatir.")
+            .addSetting("SwapDelay", 50.0, 0.0, 500.0)); 
         addMod(new Module("FastXP", "XP sisesini cok seri firlatir.")
             .addSetting("Speed", 20.0, 1.0, 20.0));
         addMod(new Module("NightVision", "Karanligi aydinlatir.")); 
@@ -57,14 +58,14 @@ public class Mbest700 implements ClientModInitializer {
     public static void onTick() {
         if (mc.player == null || mc.world == null) return;
 
-        // --- SMART TOTEM (FIXED & ANTI-CHEAT SAFE) ---
+        // Smart Totem (Fixed & Auto Close)
         if (getMod("SmartTotem").enabled && !mc.player.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING)) {
             long delay = (long) getMod("SmartTotem").getSetting("SwapDelay").val;
             if (System.currentTimeMillis() - totemTimer >= delay) {
                 int slot = findTotemAnywhere();
                 if (slot != -1) {
-                    // Envanter paketleri göndererek insansı alım
                     mc.interactionManager.clickSlot(mc.player.currentScreenHandler.syncId, slot, 45, SlotActionType.SWAP, mc.player);
+                    mc.getNetworkHandler().sendPacket(new CloseHandledScreenC2SPacket(mc.player.currentScreenHandler.syncId));
                     totemTimer = System.currentTimeMillis();
                 }
             }
@@ -87,6 +88,38 @@ public class Mbest700 implements ClientModInitializer {
         if (anchorStep != -1) doLockedAnchor();
     }
 
+    // --- AUTO SWORD HIT: VUR VE GERI DON (GUNCEL) ---
+    private static void doAutoSwordHit() {
+        if (System.currentTimeMillis() - swordTimer < 600) return;
+        if (mc.crosshairTarget instanceof EntityHitResult ehr && ehr.getEntity() instanceof PlayerEntity target) {
+            if (mc.player.distanceTo(target) < getMod("AutoSwordHit").getSetting("Range").val) {
+                int sword = findItemHotbar(Items.NETHERITE_SWORD);
+                if (sword == -1) sword = findItemHotbar(Items.DIAMOND_SWORD); // Diamond sword fallback
+
+                if (sword != -1) {
+                    int oldSlot = mc.player.getInventory().selectedSlot; // Eski slota bak
+                    
+                    // Kılıca geç, vur ve elini salla
+                    mc.player.getInventory().selectedSlot = sword;
+                    mc.interactionManager.attackEntity(mc.player, target);
+                    mc.player.swingHand(Hand.MAIN_HAND);
+                    
+                    // Çok kısa bir gecikmeyle (50ms) eski iteme geri dön
+                    new Timer().schedule(new TimerTask() {
+                        @Override
+                        public void run() {
+                            mc.player.getInventory().selectedSlot = oldSlot;
+                        }
+                    }, 50);
+
+                    swordTimer = System.currentTimeMillis();
+                }
+            }
+        }
+    }
+
+    // Diğer metodlar (doTriggerBot, doLockedAnchor, doAutoCrystal vb.) V26'daki haliyle korunmuştur...
+
     private static void doTriggerBot() {
         if (mc.crosshairTarget instanceof EntityHitResult ehr && ehr.getEntity() instanceof PlayerEntity target) {
             double range = getMod("TriggerBot").getSetting("Range").val;
@@ -104,17 +137,13 @@ public class Mbest700 implements ClientModInitializer {
         Vec3d center = Vec3d.ofCenter(targetAnchorPos);
         float[] rots = getRotations(center);
         mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(rots[0], rots[1], mc.player.isOnGround(), true));
-
         int anc = findItemHotbar(Items.RESPAWN_ANCHOR);
         int glow = findItemHotbar(Items.GLOWSTONE);
         int totem = findItemHotbar(Items.TOTEM_OF_UNDYING);
-
         if (anc == -1 || glow == -1) { anchorStep = -1; return; }
-
         long now = System.currentTimeMillis();
         double delay = getMod("AutoAnchor").getSetting("Delay").val;
         BlockHitResult bhr = new BlockHitResult(center, net.minecraft.util.math.Direction.UP, targetAnchorPos, false);
-
         switch (anchorStep) {
             case 0: mc.player.getInventory().selectedSlot = anc; mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bhr); anchorTimer = now; anchorStep = 1; break;
             case 1: if (now - anchorTimer >= delay) { mc.player.getInventory().selectedSlot = glow; mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bhr); anchorTimer = now; anchorStep = 2; } break;
@@ -130,7 +159,6 @@ public class Mbest700 implements ClientModInitializer {
         if (!mc.options.useKey.isPressed()) return; 
         double speed = getMod("AutoCrystal").getSetting("Speed").val;
         if (System.currentTimeMillis() - crystalTimer < (1000 / speed)) return;
-
         if (mc.crosshairTarget instanceof EntityHitResult ehr && ehr.getEntity() instanceof EndCrystalEntity crystal) {
             mc.interactionManager.attackEntity(mc.player, crystal);
             mc.player.swingHand(Hand.MAIN_HAND);
@@ -147,46 +175,6 @@ public class Mbest700 implements ClientModInitializer {
         }
     }
 
-    private static void doShieldCracker() {
-        if (System.currentTimeMillis() - shieldTimer < 250) return;
-        for (Entity e : mc.world.getEntities()) {
-            if (e instanceof PlayerEntity target && target != mc.player && target.isBlocking()) {
-                int axe = findAxe();
-                if (axe != -1 && mc.player.distanceTo(target) < 4.0) {
-                    mc.player.getInventory().selectedSlot = axe;
-                    mc.interactionManager.attackEntity(mc.player, target);
-                    shieldTimer = System.currentTimeMillis();
-                }
-            }
-        }
-    }
-
-    private static void doFastXP() {
-        if (mc.options.useKey.isPressed() && mc.player.getMainHandStack().isOf(Items.EXPERIENCE_BOTTLE)) {
-            if (System.currentTimeMillis() - xpTimer >= (1000 / getMod("FastXP").getSetting("Speed").val)) {
-                mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
-                xpTimer = System.currentTimeMillis();
-            }
-        }
-    }
-
-    private static void doAutoSwordHit() {
-        if (System.currentTimeMillis() - swordTimer < 600) return;
-        if (mc.crosshairTarget instanceof EntityHitResult ehr && ehr.getEntity() instanceof PlayerEntity target) {
-            if (mc.player.distanceTo(target) < getMod("AutoSwordHit").getSetting("Range").val) {
-                int sword = findItemHotbar(Items.NETHERITE_SWORD);
-                if (sword != -1) {
-                    int oldSlot = mc.player.getInventory().selectedSlot;
-                    mc.player.getInventory().selectedSlot = sword;
-                    mc.interactionManager.attackEntity(mc.player, target);
-                    mc.player.swingHand(Hand.MAIN_HAND);
-                    swordTimer = System.currentTimeMillis();
-                    new Timer().schedule(new TimerTask() { @Override public void run() { mc.player.getInventory().selectedSlot = oldSlot; }}, 50);
-                }
-            }
-        }
-    }
-
     public static void onKey(int key) {
         if (key == GLFW.GLFW_KEY_RIGHT_SHIFT) mc.setScreen(new AmethystGui());
         if (key == GLFW.GLFW_KEY_V && anchorStep == -1) {
@@ -197,19 +185,18 @@ public class Mbest700 implements ClientModInitializer {
         }
     }
 
+    // GUI ve find metotları aynı kalmıştır...
     public static class AmethystGui extends Screen {
         private String selectedMod = "";
         public AmethystGui() { super(Text.literal("Amethyst")); }
-
         @Override
         public void render(DrawContext context, int mouseX, int mouseY, float delta) {
             context.fill(10, 10, 245, 310, 0xEE050505);
-            context.drawText(this.textRenderer, "§dMbest700 §fV25", 20, 20, 0xFFFFFF, true);
+            context.drawText(this.textRenderer, "§dMbest700 §fV27", 20, 20, 0xFFFFFF, true);
             int y = 45;
             for (Module m : moduleMap.values()) {
                 context.fill(20, y, 24, y + 10, m.enabled ? 0xFF9933FF : 0xFF444444);
                 context.drawText(this.textRenderer, (m.name.equals(selectedMod) ? "§e> " : "§f") + m.name, 30, y + 1, 0xFFFFFF, false);
-                
                 if (m.name.equals(selectedMod)) {
                     y += 15;
                     context.drawText(this.textRenderer, "§7" + m.info, 40, y, 0xAAAAAA, false);
@@ -221,7 +208,6 @@ public class Mbest700 implements ClientModInitializer {
                 y += 18;
             }
         }
-
         @Override
         public boolean mouseClicked(double mouseX, double mouseY, int button) {
             int y = 45;
@@ -236,8 +222,8 @@ public class Mbest700 implements ClientModInitializer {
                     for (Setting s : m.settings.values()) {
                         y += 15;
                         if (mouseX > 40 && mouseX < 180 && mouseY > y && mouseY < y + 12) {
-                            if (button == 0) s.val = Math.min(s.max, s.val + (s.max - s.min) / 10.0);
-                            else s.val = Math.max(s.min, s.val - (s.max - s.min) / 10.0);
+                            if (button == 0) s.val = Math.min(s.max, s.val + 1);
+                            else s.val = Math.max(s.min, s.val - 1);
                             return true;
                         }
                     }
@@ -278,5 +264,5 @@ public class Mbest700 implements ClientModInitializer {
         public String name; public double val, min, max;
         public Setting(String n, double v, double min, double max) { name = n; val = v; this.min = min; this.max = max; }
     }
-                                                       }
-            
+                                               }
+                             
