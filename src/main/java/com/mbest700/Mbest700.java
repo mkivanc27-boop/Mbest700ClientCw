@@ -8,7 +8,6 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.decoration.EndCrystalEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.AxeItem;
-import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
@@ -25,8 +24,9 @@ public class Mbest700 implements ClientModInitializer {
     public static final MinecraftClient mc = MinecraftClient.getInstance();
     public static Map<String, Module> moduleMap = new LinkedHashMap<>();
     
-    private static long crystalTimer, anchorTimer, shieldTimer, swordTimer, xpTimer = 0;
+    private static long crystalTimer, anchorTimer, shieldTimer, swordTimer, xpTimer, maceTimer = 0;
     private static int anchorStep = -1;
+    private static int lastSlot = -1;
     private static BlockPos targetAnchorPos = null;
 
     @Override
@@ -37,6 +37,7 @@ public class Mbest700 implements ClientModInitializer {
     public static void init() {
         addMod(new Module("AutoCrystal", "Combat").addSetting("Speed", 45.0, 1.0, 100.0));
         addMod(new Module("AutoAnchor", "Combat").addSetting("Delay", 30.0, 5.0, 200.0));
+        addMod(new Module("AutoMace", "Combat").addSetting("FallDist", 2.0, 1.5, 10.0).addSetting("MaceSlot", 1.0, 1.0, 9.0));
         addMod(new Module("ShieldCracker", "Combat"));
         addMod(new Module("AutoSwordHit", "Combat"));
         addMod(new Module("Velocity", "Combat").addSetting("Reduce", 100.0, 0.0, 100.0));
@@ -51,17 +52,21 @@ public class Mbest700 implements ClientModInitializer {
     public static void onTick() {
         if (mc.player == null || mc.world == null) return;
 
-        if (getMod("FullBright").enabled) mc.options.getGamma().setValue(100.0);
-
+        // --- TOTEM ÖNCELİĞİ (FIXED) ---
+        // Eğer totem modülü açıksa ve canın kritikse veya totem yoksa Anchor bile olsa totemi çeker.
         if (getMod("SmartTotem").enabled && !mc.player.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING)) {
             int slot = findTotemAnywhere();
-            if (slot != -1) mc.interactionManager.clickSlot(0, slot, 45, SlotActionType.SWAP, mc.player);
+            if (slot != -1) {
+                mc.interactionManager.clickSlot(0, slot, 45, SlotActionType.SWAP, mc.player);
+            }
         }
 
+        if (getMod("FullBright").enabled) mc.options.getGamma().setValue(100.0);
         if (getMod("FastXP").enabled) doFastXP();
         if (getMod("AutoCrystal").enabled) doAutoCrystal();
         if (getMod("ShieldCracker").enabled) doShieldCracker();
         if (getMod("AutoSwordHit").enabled) doAutoSwordHit();
+        if (getMod("AutoMace").enabled) doAutoMace();
         if (anchorStep != -1) doLockedAnchor();
 
         if (getMod("Velocity").enabled && mc.player.hurtTime > 0) {
@@ -70,10 +75,77 @@ public class Mbest700 implements ClientModInitializer {
         }
     }
 
+    // --- AUTO MACE (YENİ ÖZELLİK) ---
+    private static void doAutoMace() {
+        if (mc.player.fallDistance > getMod("AutoMace").getSetting("FallDist").val) {
+            for (Entity e : mc.world.getEntities()) {
+                if (e instanceof PlayerEntity target && target != mc.player && mc.player.distanceTo(target) < 4.5) {
+                    int maceHotbar = findItemHotbar(Items.MACE);
+                    int maceSlotSetting = (int)getMod("AutoMace").getSetting("MaceSlot").val - 1;
+
+                    if (maceHotbar == -1) { // Hotbarda yoksa envanterden seçilen slota çek
+                        int invMace = findMaceInventory();
+                        if (invMace != -1) {
+                            mc.interactionManager.clickSlot(0, invMace, maceSlotSetting, SlotActionType.SWAP, mc.player);
+                            maceHotbar = maceSlotSetting;
+                        }
+                    }
+
+                    if (maceHotbar != -1) {
+                        lastSlot = mc.player.getInventory().selectedSlot;
+                        mc.player.getInventory().selectedSlot = maceHotbar;
+                        mc.interactionManager.attackEntity(mc.player, target);
+                        mc.player.swingHand(Hand.MAIN_HAND);
+                        // Vurduktan sonra eski slota dön
+                        new Timer().schedule(new TimerTask() {
+                            @Override public void run() { mc.player.getInventory().selectedSlot = lastSlot; }
+                        }, 100);
+                    }
+                }
+            }
+        }
+    }
+
+    private static void doLockedAnchor() {
+        if (targetAnchorPos == null) { anchorStep = -1; return; }
+        Vec3d center = Vec3d.ofCenter(targetAnchorPos);
+        float[] rots = getRotations(center);
+        mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(rots[0], rots[1], mc.player.isOnGround(), true));
+
+        int anc = findItemHotbar(Items.RESPAWN_ANCHOR);
+        int glow = findItemHotbar(Items.GLOWSTONE);
+        if (anc == -1 || glow == -1) { anchorStep = -1; return; }
+
+        long now = System.currentTimeMillis();
+        double delay = getMod("AutoAnchor").getSetting("Delay").val;
+        
+        // Yere koyma hatası fix: Direction.UP yerine bhr için daha genel bir yaklaşım
+        BlockHitResult bhr = new BlockHitResult(center, net.minecraft.util.math.Direction.UP, targetAnchorPos, false);
+
+        switch (anchorStep) {
+            case 0: // Koy
+                mc.player.getInventory().selectedSlot = anc;
+                mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bhr);
+                anchorTimer = now; anchorStep = 1; break;
+            case 1: // Doldur
+                if (now - anchorTimer >= delay) {
+                    mc.player.getInventory().selectedSlot = glow;
+                    mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bhr);
+                    anchorTimer = now; anchorStep = 2;
+                } break;
+            case 2: // Patlat
+                if (now - anchorTimer >= delay) {
+                    mc.player.getInventory().selectedSlot = anc;
+                    mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bhr);
+                    anchorStep = -1; targetAnchorPos = null;
+                } break;
+        }
+    }
+
     private static void doShieldCracker() {
         if (System.currentTimeMillis() - shieldTimer < 250) return;
         for (Entity e : mc.world.getEntities()) {
-            if (e instanceof PlayerEntity target && target != mc.player && target.isBlocking()) { // FIX: isUsingShield yerine isBlocking
+            if (e instanceof PlayerEntity target && target != mc.player && target.isBlocking()) {
                 int axe = findAxe();
                 if (axe != -1 && mc.player.distanceTo(target) < 4.0) {
                     mc.player.getInventory().selectedSlot = axe;
@@ -95,28 +167,6 @@ public class Mbest700 implements ClientModInitializer {
                     swordTimer = System.currentTimeMillis();
                 }
             }
-        }
-    }
-
-    private static void doLockedAnchor() {
-        if (targetAnchorPos == null) { anchorStep = -1; return; }
-        Vec3d center = Vec3d.ofCenter(targetAnchorPos);
-        float[] rots = getRotations(center);
-        // FIX: 4 Parametreli Paket Hatası Giderildi
-        mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(rots[0], rots[1], mc.player.isOnGround(), true));
-
-        int anc = findItemHotbar(Items.RESPAWN_ANCHOR);
-        int glow = findItemHotbar(Items.GLOWSTONE);
-        if (anc == -1 || glow == -1) { anchorStep = -1; return; }
-
-        long now = System.currentTimeMillis();
-        double delay = getMod("AutoAnchor").getSetting("Delay").val;
-        BlockHitResult bhr = new BlockHitResult(center, net.minecraft.util.math.Direction.UP, targetAnchorPos, false);
-
-        switch (anchorStep) {
-            case 0: mc.player.getInventory().selectedSlot = anc; mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bhr); anchorTimer = now; anchorStep = 1; break;
-            case 1: if (now - anchorTimer >= delay) { mc.player.getInventory().selectedSlot = glow; mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bhr); anchorTimer = now; anchorStep = 2; } break;
-            case 2: if (now - anchorTimer >= delay) { mc.player.getInventory().selectedSlot = anc; mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bhr); anchorStep = -1; targetAnchorPos = null; } break;
         }
     }
 
@@ -158,8 +208,8 @@ public class Mbest700 implements ClientModInitializer {
         @Override
         public void render(DrawContext context, int mouseX, int mouseY, float delta) {
             fade = Math.min(fade + 0.1f, 1.0f);
-            context.fill(10, 10, 210, 280, (int)(0xDD * fade) << 24 | 0x050505);
-            context.drawText(this.textRenderer, "§dMbest700 §fV11", 20, 20, 0xFFFFFF, true);
+            context.fill(10, 10, 220, 290, (int)(0xDD * fade) << 24 | 0x050505);
+            context.drawText(this.textRenderer, "§dMbest700 §fV12", 20, 20, 0xFFFFFF, true);
             int x = 20; int y = 40;
             for (Module m : moduleMap.values()) {
                 int baseCol = m.enabled ? 0xFF9933FF : 0xFF444444;
@@ -203,6 +253,10 @@ public class Mbest700 implements ClientModInitializer {
         for (int i = 0; i < 45; i++) if (mc.player.getInventory().getStack(i).isOf(Items.TOTEM_OF_UNDYING)) return i < 9 ? i + 36 : i;
         return -1;
     }
+    private static int findMaceInventory() {
+        for (int i = 9; i < 36; i++) if (mc.player.getInventory().getStack(i).isOf(Items.MACE)) return i;
+        return -1;
+    }
     private static int findItemHotbar(net.minecraft.item.Item item) {
         for (int i = 0; i < 9; i++) if (mc.player.getInventory().getStack(i).isOf(item)) return i;
         return -1;
@@ -230,5 +284,5 @@ public class Mbest700 implements ClientModInitializer {
         public String name; public double val, min, max;
         public Setting(String n, double v, double min, double max) { name = n; val = v; this.min = min; this.max = max; }
     }
-            }
-        
+                        }
+                        
