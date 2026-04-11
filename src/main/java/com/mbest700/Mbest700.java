@@ -25,7 +25,7 @@ public class Mbest700 implements ClientModInitializer {
     public static final MinecraftClient mc = MinecraftClient.getInstance();
     public static Map<String, Module> moduleMap = new LinkedHashMap<>();
     
-    // --- DEĞİŞKENLER ---
+    // Değişkenler (Build Fix)
     private static long anchorTimer, shieldTimer, swordTimer, xpTimer, triggerTimer = 0;
     private static int anchorStep = -1;
     private static BlockPos targetAnchorPos = null;
@@ -36,10 +36,10 @@ public class Mbest700 implements ClientModInitializer {
     }
 
     public static void init() {
-        // Mace Kalktı, Trigger Geldi!
+        // Mace Gitti -> TriggerBot Geldi!
         addMod(new Module("AirPlace Anchor", "Combat").addSetting("Delay", 30.0, 5.0, 200.0));
         addMod(new Module("AutoAnchor", "Combat").addSetting("Delay", 30.0, 5.0, 200.0));
-        addMod(new Module("TriggerBot", "Combat").addSetting("APS", 10.0, 1.0, 20.0));
+        addMod(new Module("TriggerBot", "Combat").addSetting("APS", 12.0, 1.0, 20.0));
         addMod(new Module("ShieldCracker", "Combat"));
         addMod(new Module("AutoSwordHit", "Combat").addSetting("Range", 3.8, 2.0, 6.0));
         addMod(new Module("SmartTotem", "Player"));
@@ -52,7 +52,6 @@ public class Mbest700 implements ClientModInitializer {
     public static void onTick() {
         if (mc.player == null || mc.world == null) return;
 
-        // SmartTotem - Sol eli korur
         if (getMod("SmartTotem").enabled && !mc.player.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING)) {
             int slot = findTotemAnywhere();
             if (slot != -1) mc.interactionManager.clickSlot(0, slot, 45, SlotActionType.SWAP, mc.player);
@@ -65,11 +64,11 @@ public class Mbest700 implements ClientModInitializer {
         if (getMod("FastXP").enabled) doFastXP();
         if (getMod("ShieldCracker").enabled) doShieldCracker();
         if (getMod("AutoSwordHit").enabled) doAutoSwordHit();
-        if (getMod("TriggerBot").enabled) doTriggerBot(); // Yeni Sistem
+        if (getMod("TriggerBot").enabled) doTriggerBot();
         if (anchorStep != -1) doLockedAnchor();
     }
 
-    // --- TRIGGER BOT: BAKTIĞIN AN VURUR ---
+    // --- TRIGGER BOT: RAKİBE BAKTIĞIN AN OTOMATİK VURUŞ ---
     private static void doTriggerBot() {
         double aps = getMod("TriggerBot").getSetting("APS").val;
         if (System.currentTimeMillis() - triggerTimer < (1000 / aps)) return;
@@ -88,7 +87,7 @@ public class Mbest700 implements ClientModInitializer {
         if (targetAnchorPos == null) { anchorStep = -1; return; }
         Vec3d center = Vec3d.ofCenter(targetAnchorPos);
         float[] rots = getRotations(center);
-        // Paket Fix
+        // Paket Constructor Fix
         mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(rots[0], rots[1], mc.player.isOnGround(), true));
 
         int anc = findItemHotbar(Items.RESPAWN_ANCHOR);
@@ -105,7 +104,6 @@ public class Mbest700 implements ClientModInitializer {
             case 0: mc.player.getInventory().selectedSlot = anc; mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bhr); anchorTimer = now; anchorStep = 1; break;
             case 1: if (now - anchorTimer >= delay) { mc.player.getInventory().selectedSlot = glow; mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bhr); anchorTimer = now; anchorStep = 2; } break;
             case 2: if (now - anchorTimer >= delay) {
-                // Hotbardaki totemi kurban etme mantığı
                 mc.player.getInventory().selectedSlot = (hTotem != -1) ? hTotem : anc;
                 mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bhr);
                 anchorStep = -1; targetAnchorPos = null;
@@ -124,7 +122,6 @@ public class Mbest700 implements ClientModInitializer {
                     mc.interactionManager.attackEntity(mc.player, target);
                     mc.player.swingHand(Hand.MAIN_HAND);
                     swordTimer = System.currentTimeMillis();
-                    // Slota geri dönme fix
                     new Timer().schedule(new TimerTask() { @Override public void run() { mc.player.getInventory().selectedSlot = oldSlot; }}, 50);
                 }
             }
@@ -134,7 +131,7 @@ public class Mbest700 implements ClientModInitializer {
     private static void doShieldCracker() {
         if (System.currentTimeMillis() - shieldTimer < 250) return;
         for (Entity e : mc.world.getEntities()) {
-            if (e instanceof PlayerEntity target && target != mc.player && target.isBlocking()) { // isUsingShield Fix
+            if (e instanceof PlayerEntity target && target != mc.player && target.isBlocking()) { // isUsingShield() yerine isBlocking()
                 int axe = findAxe();
                 if (axe != -1 && mc.player.distanceTo(target) < 4.0) {
                     mc.player.getInventory().selectedSlot = axe;
@@ -146,7 +143,8 @@ public class Mbest700 implements ClientModInitializer {
     }
 
     private static void doFastXP() {
-        if (mc.options.useKey.isPressed() && mc.player.getMainHandStack().isOf(Items.EXPERIENCE_Bottle)) {
+        // EXPERIENCE_Bottle HATASI DÜZELTİLDİ
+        if (mc.options.useKey.isPressed() && mc.player.getMainHandStack().isOf(Items.EXPERIENCE_BOTTLE)) {
             if (System.currentTimeMillis() - xpTimer >= (1000 / getMod("FastXP").getSetting("Speed").val)) {
                 mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
                 xpTimer = System.currentTimeMillis();
@@ -172,7 +170,7 @@ public class Mbest700 implements ClientModInitializer {
         @Override
         public void render(DrawContext context, int mouseX, int mouseY, float delta) {
             context.fill(10, 10, 220, 290, 0xDD050505);
-            context.drawText(this.textRenderer, "§dMbest700 §fV17", 20, 20, 0xFFFFFF, true);
+            context.drawText(this.textRenderer, "§dMbest700 §fV18", 20, 20, 0xFFFFFF, true);
             int x = 20; int y = 40;
             for (Module m : moduleMap.values()) {
                 context.fill(x, y, x + 4, y + 12, m.enabled ? 0xFF9933FF : 0xFF444444);
@@ -231,5 +229,4 @@ public class Mbest700 implements ClientModInitializer {
         public String name; public double val, min, max;
         public Setting(String n, double v, double min, double max) { name = n; val = v; this.min = min; this.max = max; }
     }
-                        }
-                    
+}
