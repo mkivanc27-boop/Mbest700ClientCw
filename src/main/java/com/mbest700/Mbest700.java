@@ -6,8 +6,6 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.decoration.EndCrystalEntity;
-import net.minecraft.entity.effect.StatusEffectInstance;
-import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.AxeItem;
 import net.minecraft.item.Items;
@@ -36,15 +34,21 @@ public class Mbest700 implements ClientModInitializer {
     }
 
     public static void init() {
-        // Modüller ve Ayarlar
-        addMod(new Module("AutoAnchor", "Combat").addSetting("Delay", 30.0, 5.0, 200.0));
-        addMod(new Module("AutoCrystal", "Combat").addSetting("Speed", 15.0, 1.0, 30.0));
-        addMod(new Module("TriggerBot", "Combat")); 
-        addMod(new Module("ShieldCracker", "Combat"));
-        addMod(new Module("AutoSwordHit", "Combat").addSetting("Range", 3.8, 2.0, 6.0));
-        addMod(new Module("SmartTotem", "Player"));
-        addMod(new Module("FastXP", "Player").addSetting("Speed", 20.0, 1.0, 20.0));
-        addMod(new Module("NightVision", "Render")); 
+        // Modüller ve Info Yazıları
+        addMod(new Module("AutoCrystal", "Kristal koyar/patlatır.")
+            .addSetting("Speed", 20.0, 1.0, 50.0));
+        addMod(new Module("AutoAnchor", "V tusuyla otomatik Anchor patlatir.")
+            .addSetting("Delay", 30.0, 5.0, 200.0));
+        addMod(new Module("Velocity", "Aldiginiz geri tepmeyi (knockback) azaltir.")
+            .addSetting("Reduce", 100.0, 0.0, 100.0));
+        addMod(new Module("TriggerBot", "Baktiginiz oyuncuya otomatik vurur.")); 
+        addMod(new Module("ShieldCracker", "Kalkan kullananlarin kalkanini kirar."));
+        addMod(new Module("AutoSwordHit", "Menzile giren oyuncuya kilicla vurur.")
+            .addSetting("Range", 3.8, 2.0, 6.0));
+        addMod(new Module("SmartTotem", "Envanterden otomatik totem ceker."));
+        addMod(new Module("FastXP", "XP sisesini cok hizli firlatir.")
+            .addSetting("Speed", 20.0, 1.0, 20.0));
+        addMod(new Module("NightVision", "Karanlikta gormenizi saglar.")); 
     }
 
     private static void addMod(Module m) { moduleMap.put(m.name, m); }
@@ -58,7 +62,12 @@ public class Mbest700 implements ClientModInitializer {
         }
 
         if (getMod("NightVision").enabled) {
-            mc.player.addStatusEffect(new StatusEffectInstance(StatusEffects.NIGHT_VISION, 1000, 0, false, false));
+            mc.player.addStatusEffect(new net.minecraft.entity.effect.StatusEffectInstance(net.minecraft.entity.effect.StatusEffects.NIGHT_VISION, 1000, 0, false, false));
+        }
+
+        if (getMod("Velocity").enabled && mc.player.hurtTime > 0) {
+            double red = getMod("Velocity").getSetting("Reduce").val / 100.0;
+            mc.player.setVelocity(mc.player.getVelocity().multiply(red, 1.0, red));
         }
 
         if (getMod("FastXP").enabled) doFastXP();
@@ -69,21 +78,16 @@ public class Mbest700 implements ClientModInitializer {
         if (anchorStep != -1) doLockedAnchor();
     }
 
-    // --- AUTO CRYSTAL: SAĞ TIK BASILIYKEN KOY-PATLAT ---
     private static void doAutoCrystal() {
-        if (!mc.options.useKey.isPressed()) return; // Sağ tık basılı değilse dur
-
+        if (!mc.options.useKey.isPressed()) return; 
         double speed = getMod("AutoCrystal").getSetting("Speed").val;
         if (System.currentTimeMillis() - crystalTimer < (1000 / speed)) return;
 
-        // 1. Patlatma (Kristale bakıyorsan vur)
         if (mc.crosshairTarget instanceof EntityHitResult ehr && ehr.getEntity() instanceof EndCrystalEntity crystal) {
             mc.interactionManager.attackEntity(mc.player, crystal);
             mc.player.swingHand(Hand.MAIN_HAND);
             crystalTimer = System.currentTimeMillis();
-        } 
-        // 2. Koyma (Obsidiyene bakıyorsan kristal koy)
-        else if (mc.crosshairTarget instanceof BlockHitResult bhr) {
+        } else if (mc.crosshairTarget instanceof BlockHitResult bhr) {
             int crySlot = findItemHotbar(Items.END_CRYSTAL);
             if (crySlot != -1) {
                 int oldSlot = mc.player.getInventory().selectedSlot;
@@ -95,21 +99,10 @@ public class Mbest700 implements ClientModInitializer {
         }
     }
 
-    private static void doTriggerBot() {
-        if (mc.crosshairTarget instanceof EntityHitResult ehr && ehr.getEntity() instanceof PlayerEntity target) {
-            // Sadece saldırı barı dolduğunda vurur (spam engellendi)
-            if (target != mc.player && target.isAlive() && mc.player.getAttackCooldownProgress(0.5f) >= 1.0f) {
-                mc.interactionManager.attackEntity(mc.player, target);
-                mc.player.swingHand(Hand.MAIN_HAND);
-            }
-        }
-    }
-
     private static void doLockedAnchor() {
-        if (targetAnchorPos == null) return;
+        if (targetAnchorPos == null) { anchorStep = -1; return; }
         Vec3d center = Vec3d.ofCenter(targetAnchorPos);
         float[] rots = getRotations(center);
-        // Paket hatası fixlendi
         mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(rots[0], rots[1], mc.player.isOnGround(), true));
 
         int anc = findItemHotbar(Items.RESPAWN_ANCHOR);
@@ -127,10 +120,19 @@ public class Mbest700 implements ClientModInitializer {
         }
     }
 
+    private static void doTriggerBot() {
+        if (mc.crosshairTarget instanceof EntityHitResult ehr && ehr.getEntity() instanceof PlayerEntity target) {
+            if (target != mc.player && target.isAlive() && mc.player.getAttackCooldownProgress(0.5f) >= 1.0f) {
+                mc.interactionManager.attackEntity(mc.player, target);
+                mc.player.swingHand(Hand.MAIN_HAND);
+            }
+        }
+    }
+
     private static void doShieldCracker() {
         if (System.currentTimeMillis() - shieldTimer < 250) return;
         for (Entity e : mc.world.getEntities()) {
-            if (e instanceof PlayerEntity target && target != mc.player && target.isBlocking()) { // isUsingShield Fix
+            if (e instanceof PlayerEntity target && target != mc.player && target.isBlocking()) {
                 int axe = findAxe();
                 if (axe != -1 && mc.player.distanceTo(target) < 4.0) {
                     mc.player.getInventory().selectedSlot = axe;
@@ -142,7 +144,7 @@ public class Mbest700 implements ClientModInitializer {
     }
 
     private static void doFastXP() {
-        if (mc.options.useKey.isPressed() && mc.player.getMainHandStack().isOf(Items.EXPERIENCE_BOTTLE)) { // Yazım hatası fix
+        if (mc.options.useKey.isPressed() && mc.player.getMainHandStack().isOf(Items.EXPERIENCE_BOTTLE)) {
             if (System.currentTimeMillis() - xpTimer >= (1000 / getMod("FastXP").getSetting("Speed").val)) {
                 mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
                 xpTimer = System.currentTimeMillis();
@@ -177,24 +179,26 @@ public class Mbest700 implements ClientModInitializer {
         }
     }
 
-    // --- ÖZELLEŞTİRİLEBİLİR MENÜ (FIX) ---
     public static class AmethystGui extends Screen {
         private String selectedMod = "";
         public AmethystGui() { super(Text.literal("Amethyst")); }
 
         @Override
         public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-            context.fill(10, 10, 230, 320, 0xEE050505);
-            context.drawText(this.textRenderer, "§dMbest700 §fV21", 20, 20, 0xFFFFFF, true);
+            context.fill(10, 10, 240, 310, 0xEE050505);
+            context.drawText(this.textRenderer, "§dMbest700 §fV23", 20, 20, 0xFFFFFF, true);
             int y = 45;
             for (Module m : moduleMap.values()) {
                 context.fill(20, y, 24, y + 10, m.enabled ? 0xFF9933FF : 0xFF444444);
                 context.drawText(this.textRenderer, (m.name.equals(selectedMod) ? "§e> " : "§f") + m.name, 30, y + 1, 0xFFFFFF, false);
                 
                 if (m.name.equals(selectedMod)) {
+                    // INFO KISMI (Burada her modun bilgisi yazar)
+                    y += 15;
+                    context.drawText(this.textRenderer, "§7" + m.info, 40, y, 0xAAAAAA, false);
                     for (Setting s : m.settings.values()) {
                         y += 15;
-                        context.drawText(this.textRenderer, "  " + s.name + ": §b" + String.format("%.1f", s.val), 40, y, 0xAAAAAA, false);
+                        context.drawText(this.textRenderer, "  " + s.name + ": §b" + String.format("%.1f", s.val), 40, y, 0xCCCCCC, false);
                     }
                 }
                 y += 18;
@@ -205,19 +209,18 @@ public class Mbest700 implements ClientModInitializer {
         public boolean mouseClicked(double mouseX, double mouseY, int button) {
             int y = 45;
             for (Module m : moduleMap.values()) {
-                // Modül Seçme/Açma
                 if (mouseX > 20 && mouseX < 200 && mouseY > y && mouseY < y + 15) {
-                    if (button == 0) m.toggle(); // Sol tık: Aç/Kapat
-                    else selectedMod = m.name; // Sağ tık: Ayarları göster
+                    if (button == 0) m.toggle();
+                    else selectedMod = m.name;
                     return true;
                 }
-                // Ayar Değiştirme
                 if (m.name.equals(selectedMod)) {
+                    y += 15; // Info satırını atla
                     for (Setting s : m.settings.values()) {
                         y += 15;
                         if (mouseX > 40 && mouseX < 180 && mouseY > y && mouseY < y + 12) {
-                            if (button == 0) s.val = Math.min(s.max, s.val + 1); // Sol tık: Arttır
-                            else s.val = Math.max(s.min, s.val - 1); // Sağ tık: Azalt
+                            if (button == 0) s.val = Math.min(s.max, s.val + 1);
+                            else s.val = Math.max(s.min, s.val - 1);
                             return true;
                         }
                     }
@@ -247,9 +250,9 @@ public class Mbest700 implements ClientModInitializer {
     }
     public static Module getMod(String name) { return moduleMap.get(name); }
     public static class Module {
-        public String name; public boolean enabled = false;
+        public String name, info; public boolean enabled = false;
         public Map<String, Setting> settings = new LinkedHashMap<>();
-        public Module(String n, String c) { name = n; }
+        public Module(String n, String i) { name = n; info = i; }
         public Module addSetting(String n, double v, double min, double max) { settings.put(n, new Setting(n, v, min, max)); return this; }
         public Setting getSetting(String n) { return settings.get(n); }
         public void toggle() { enabled = !enabled; }
@@ -258,4 +261,4 @@ public class Mbest700 implements ClientModInitializer {
         public String name; public double val, min, max;
         public Setting(String n, double v, double min, double max) { name = n; val = v; this.min = min; this.max = max; }
     }
-                                 }
+                }
