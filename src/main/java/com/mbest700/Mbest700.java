@@ -39,7 +39,7 @@ public class Mbest700 implements ClientModInitializer {
             .addSetting("Speed", 20.0, 1.0, 50.0));
         addMod(new Module("AutoAnchor", "V tusuyla otomatik Anchor patlatir (Totemle).")
             .addSetting("Delay", 30.0, 5.0, 200.0));
-        addMod(new Module("Velocity", "Aldiginiz geri tepmeyi (KB) yuzdesel azaltir.")
+        addMod(new Module("Velocity", "Aldiginiz geri tepmeyi yuzdesel azaltir.")
             .addSetting("Reduce", 100.0, 0.0, 100.0));
         addMod(new Module("TriggerBot", "Baktiginiz oyuncuya otomatik vurur.")
             .addSetting("Range", 3.0, 2.0, 6.0)); 
@@ -58,7 +58,6 @@ public class Mbest700 implements ClientModInitializer {
     public static void onTick() {
         if (mc.player == null || mc.world == null) return;
 
-        // Smart Totem (Fixed & Auto Close)
         if (getMod("SmartTotem").enabled && !mc.player.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING)) {
             long delay = (long) getMod("SmartTotem").getSetting("SwapDelay").val;
             if (System.currentTimeMillis() - totemTimer >= delay) {
@@ -87,38 +86,6 @@ public class Mbest700 implements ClientModInitializer {
         if (getMod("AutoCrystal").enabled) doAutoCrystal();
         if (anchorStep != -1) doLockedAnchor();
     }
-
-    // --- AUTO SWORD HIT: VUR VE GERI DON (GUNCEL) ---
-    private static void doAutoSwordHit() {
-        if (System.currentTimeMillis() - swordTimer < 600) return;
-        if (mc.crosshairTarget instanceof EntityHitResult ehr && ehr.getEntity() instanceof PlayerEntity target) {
-            if (mc.player.distanceTo(target) < getMod("AutoSwordHit").getSetting("Range").val) {
-                int sword = findItemHotbar(Items.NETHERITE_SWORD);
-                if (sword == -1) sword = findItemHotbar(Items.DIAMOND_SWORD); // Diamond sword fallback
-
-                if (sword != -1) {
-                    int oldSlot = mc.player.getInventory().selectedSlot; // Eski slota bak
-                    
-                    // Kılıca geç, vur ve elini salla
-                    mc.player.getInventory().selectedSlot = sword;
-                    mc.interactionManager.attackEntity(mc.player, target);
-                    mc.player.swingHand(Hand.MAIN_HAND);
-                    
-                    // Çok kısa bir gecikmeyle (50ms) eski iteme geri dön
-                    new Timer().schedule(new TimerTask() {
-                        @Override
-                        public void run() {
-                            mc.player.getInventory().selectedSlot = oldSlot;
-                        }
-                    }, 50);
-
-                    swordTimer = System.currentTimeMillis();
-                }
-            }
-        }
-    }
-
-    // Diğer metodlar (doTriggerBot, doLockedAnchor, doAutoCrystal vb.) V26'daki haliyle korunmuştur...
 
     private static void doTriggerBot() {
         if (mc.crosshairTarget instanceof EntityHitResult ehr && ehr.getEntity() instanceof PlayerEntity target) {
@@ -175,6 +142,47 @@ public class Mbest700 implements ClientModInitializer {
         }
     }
 
+    private static void doShieldCracker() {
+        if (System.currentTimeMillis() - shieldTimer < 250) return;
+        for (Entity e : mc.world.getEntities()) {
+            if (e instanceof PlayerEntity target && target != mc.player && target.isBlocking()) {
+                int axe = findAxe();
+                if (axe != -1 && mc.player.distanceTo(target) < 4.0) {
+                    mc.player.getInventory().selectedSlot = axe;
+                    mc.interactionManager.attackEntity(mc.player, target);
+                    shieldTimer = System.currentTimeMillis();
+                }
+            }
+        }
+    }
+
+    private static void doFastXP() {
+        if (mc.options.useKey.isPressed() && mc.player.getMainHandStack().isOf(Items.EXPERIENCE_BOTTLE)) {
+            if (System.currentTimeMillis() - xpTimer >= (1000 / getMod("FastXP").getSetting("Speed").val)) {
+                mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
+                xpTimer = System.currentTimeMillis();
+            }
+        }
+    }
+
+    private static void doAutoSwordHit() {
+        if (System.currentTimeMillis() - swordTimer < 600) return;
+        if (mc.crosshairTarget instanceof EntityHitResult ehr && ehr.getEntity() instanceof PlayerEntity target) {
+            if (mc.player.distanceTo(target) < getMod("AutoSwordHit").getSetting("Range").val) {
+                int sword = findItemHotbar(Items.NETHERITE_SWORD);
+                if (sword == -1) sword = findItemHotbar(Items.DIAMOND_SWORD);
+                if (sword != -1) {
+                    int oldSlot = mc.player.getInventory().selectedSlot;
+                    mc.player.getInventory().selectedSlot = sword;
+                    mc.interactionManager.attackEntity(mc.player, target);
+                    mc.player.swingHand(Hand.MAIN_HAND);
+                    new Timer().schedule(new TimerTask() { @Override public void run() { mc.player.getInventory().selectedSlot = oldSlot; }}, 50);
+                    swordTimer = System.currentTimeMillis();
+                }
+            }
+        }
+    }
+
     public static void onKey(int key) {
         if (key == GLFW.GLFW_KEY_RIGHT_SHIFT) mc.setScreen(new AmethystGui());
         if (key == GLFW.GLFW_KEY_V && anchorStep == -1) {
@@ -185,14 +193,13 @@ public class Mbest700 implements ClientModInitializer {
         }
     }
 
-    // GUI ve find metotları aynı kalmıştır...
     public static class AmethystGui extends Screen {
         private String selectedMod = "";
         public AmethystGui() { super(Text.literal("Amethyst")); }
         @Override
         public void render(DrawContext context, int mouseX, int mouseY, float delta) {
             context.fill(10, 10, 245, 310, 0xEE050505);
-            context.drawText(this.textRenderer, "§dMbest700 §fV27", 20, 20, 0xFFFFFF, true);
+            context.drawText(this.textRenderer, "§dMbest700 §fV28", 20, 20, 0xFFFFFF, true);
             int y = 45;
             for (Module m : moduleMap.values()) {
                 context.fill(20, y, 24, y + 10, m.enabled ? 0xFF9933FF : 0xFF444444);
@@ -264,5 +271,5 @@ public class Mbest700 implements ClientModInitializer {
         public String name; public double val, min, max;
         public Setting(String n, double v, double min, double max) { name = n; val = v; this.min = min; this.max = max; }
     }
-                                               }
-                             
+    }
+                                                          
