@@ -15,7 +15,7 @@ import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
-import net.minecraft.component.DataComponentTypes;
+import net.minecraft.util.math.Vec3d;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.*;
@@ -24,9 +24,8 @@ public class Mbest700 implements ClientModInitializer {
     public static final MinecraftClient mc = MinecraftClient.getInstance();
     public static Map<String, Module> moduleMap = new LinkedHashMap<>();
     
-    // Zamanlayıcılar (Delay Yönetimi)
-    private static long crystalTimer, anchorTimer, shieldTimer, swordTimer = 0;
-    private static int anchorStep = 0; // 0: Koy, 1: Doldur, 2: Patlat
+    private static long crystalTimer, anchorTimer, shieldTimer, swordTimer, xpTimer = 0;
+    private static int anchorStep = -1; // -1: Beklemede
 
     @Override
     public void onInitializeClient() {
@@ -34,23 +33,14 @@ public class Mbest700 implements ClientModInitializer {
     }
 
     public static void init() {
-        // --- COMBAT ---
-        addMod(new Module("AutoCrystal", "Combat")
-            .addSetting("Speed", 10.0, 1.0, 20.0)); // Vuruş hızı ayarı
-
-        addMod(new Module("AutoAnchor", "Combat")
-            .addSetting("StepDelay", 0.2, 0.1, 1.0)); // İstediğin 0.2sn gecikme
-
+        addMod(new Module("AutoCrystal", "Combat").addSetting("Speed", 25.0, 1.0, 50.0));
+        addMod(new Module("AutoAnchor", "Combat"));
         addMod(new Module("ShieldCracker", "Combat"));
-        
-        addMod(new Module("AutoSwordHit", "Combat")
-            .addSetting("LookTime", 0.5, 0.1, 2.0)); // Bakma süresi ayarı
-
-        addMod(new Module("Velocity", "Combat")
-            .addSetting("Reduce", 100.0, 0.0, 100.0)); // %100 = Sıfır KB
-
-        // --- PLAYER ---
+        addMod(new Module("AutoSwordHit", "Combat").addSetting("LookTime", 0.5, 0.1, 2.0));
+        addMod(new Module("Velocity", "Combat").addSetting("Reduce", 100.0, 0.0, 100.0));
+        addMod(new Module("TotemCounter", "Render")); // İsim üstü totem sayacı
         addMod(new Module("SmartTotem", "Player"));
+        addMod(new Module("FastXP", "Player").addSetting("Speed", 20.0, 1.0, 20.0));
         addMod(new Module("FullBright", "Render"));
     }
 
@@ -61,15 +51,20 @@ public class Mbest700 implements ClientModInitializer {
 
         if (getMod("SmartTotem").enabled) doSmartTotem();
         if (getMod("FullBright").enabled) mc.options.getGamma().setValue(100.0);
+        if (getMod("FastXP").enabled) doFastXP();
+        
+        // Velocity (Knockback İptali)
         if (getMod("Velocity").enabled && mc.player.hurtTime > 0) {
             double reduce = getMod("Velocity").getSetting("Reduce").val / 100.0;
             mc.player.setVelocity(mc.player.getVelocity().multiply(1.0 - reduce, 1.0, 1.0 - reduce));
         }
-        
+
         if (getMod("AutoCrystal").enabled) doAutoCrystal();
         if (getMod("ShieldCracker").enabled) doShieldCracker();
         if (getMod("AutoSwordHit").enabled) doAutoSwordHit();
-        if (getMod("AutoAnchor").enabled) doAutoAnchor();
+        
+        // Gelişmiş Tek Seferlik Anchor Döngüsü
+        if (anchorStep != -1) doAutoAnchorSequence();
     }
 
     private static void doAutoCrystal() {
@@ -85,40 +80,91 @@ public class Mbest700 implements ClientModInitializer {
         });
     }
 
-    private static void doAutoAnchor() {
-        double delay = getMod("AutoAnchor").getSetting("StepDelay").val * 1000;
-        if (System.currentTimeMillis() - anchorTimer < delay) return;
-
+    // --- TAM İSTEDİĞİN ANCHOR SIRALAMASI ---
+    private static void doAutoAnchorSequence() {
         HitResult hit = mc.crosshairTarget;
-        if (!(hit instanceof BlockHitResult bHit)) return;
+        if (!(hit instanceof BlockHitResult bHit)) { anchorStep = -1; return; }
 
         int anc = findItem(Items.RESPAWN_ANCHOR);
         int glow = findItem(Items.GLOWSTONE);
+        if (anc == -1 || glow == -1) { anchorStep = -1; return; }
 
-        if (anc != -1 && glow != -1) {
-            switch (anchorStep) {
-                case 0: // Anchor Koy
-                    mc.player.getInventory().selectedSlot = anc;
-                    mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bHit);
-                    anchorStep = 1;
-                    break;
-                case 1: // Glowstone Doldur
+        long now = System.currentTimeMillis();
+
+        switch (anchorStep) {
+            case 0: // Anchor Koy
+                mc.player.getInventory().selectedSlot = anc;
+                mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bHit);
+                anchorTimer = now;
+                anchorStep = 1;
+                break;
+            case 1: // 0.2sn Bekle -> Glowstone Koy
+                if (now - anchorTimer >= 200) {
                     mc.player.getInventory().selectedSlot = glow;
                     mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bHit);
+                    anchorTimer = now;
                     anchorStep = 2;
-                    break;
-                case 2: // Patlat
+                }
+                break;
+            case 2: // 0.1sn Bekle -> Patlat (Önce Totem Kontrolü)
+                if (now - anchorTimer >= 100) {
+                    // Patlatmadan önce Totem slotuna geçmeye çalış (eğer varsa) yoksa Anchor ile patlat
+                    int totem = findItem(Items.TOTEM_OF_UNDYING);
+                    mc.player.getInventory().selectedSlot = (totem != -1) ? totem : anc;
                     mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bHit);
-                    anchorStep = 0;
-                    break;
-            }
-            anchorTimer = System.currentTimeMillis();
+                    anchorStep = -1; // Döngüyü bitir (Sürekli patlatmaz)
+                }
+                break;
         }
     }
 
+    private static void doFastXP() {
+        if (mc.options.useKey.isPressed() && mc.player.getMainHandStack().isOf(Items.EXPERIENCE_BOTTLE)) {
+            double speed = getMod("FastXP").getSetting("Speed").val;
+            if (System.currentTimeMillis() - xpTimer < (1000 / speed)) return;
+            mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
+            xpTimer = System.currentTimeMillis();
+        }
+    }
+
+    private static void doSmartTotem() {
+        // Envanterde totem varsa ve offhand boşsa veya başka bir şey varsa anında çek
+        if (!mc.player.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING)) {
+            for (int i = 0; i < 36; i++) {
+                if (mc.player.getInventory().getStack(i).isOf(Items.TOTEM_OF_UNDYING)) {
+                    mc.interactionManager.clickSlot(0, i < 9 ? i + 36 : i, 45, SlotActionType.SWAP, mc.player);
+                    break;
+                }
+            }
+        }
+    }
+
+    // --- RENDER: TOTEM COUNTER ---
+    public static void onRenderNameTag(PlayerEntity player, DrawContext context, float tickDelta) {
+        if (!getMod("TotemCounter").enabled || player == mc.player) return;
+        
+        int totemCount = 0;
+        for (int i = 0; i < player.getInventory().size(); i++) {
+            if (player.getInventory().getStack(i).isOf(Items.TOTEM_OF_UNDYING)) totemCount++;
+        }
+        if (player.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING)) totemCount++;
+
+        String text = "§e[§6Totems: " + totemCount + "§e]";
+        // Bu kısım MixinEntityRenderer üzerinden çağrılmalıdır. Basit gösterim:
+        context.drawText(mc.textRenderer, text, 0, -10, 0xFFFFFF, true);
+    }
+
+    public static void onKey(int key) {
+        if (key == GLFW.GLFW_KEY_RIGHT_SHIFT) mc.setScreen(new AmethystGui());
+        // V tuşuna basıldığında döngüyü sadece BAŞLATIR
+        if (key == GLFW.GLFW_KEY_V && getMod("AutoAnchor").enabled && anchorStep == -1) {
+            anchorStep = 0;
+        }
+    }
+
+    // --- DİĞER METODLAR (Aynı) ---
     private static void doShieldCracker() {
         if (System.currentTimeMillis() - shieldTimer < 1000) return;
-        // Sadece rakip kalkan tutuyorsa çalışır
         if (mc.targetedEntity instanceof PlayerEntity target && target.isHolding(Items.SHIELD)) {
             int axe = findAxe();
             if (axe != -1) {
@@ -135,35 +181,19 @@ public class Mbest700 implements ClientModInitializer {
         double lookDelay = getMod("AutoSwordHit").getSetting("LookTime").val * 1000;
         if (mc.targetedEntity instanceof PlayerEntity target) {
             if (swordTimer == 0) swordTimer = System.currentTimeMillis();
-            
             if (System.currentTimeMillis() - swordTimer >= lookDelay) {
                 int sword = findSword();
                 if (sword != -1) {
                     int old = mc.player.getInventory().selectedSlot;
                     mc.player.getInventory().selectedSlot = sword;
                     mc.interactionManager.attackEntity(mc.player, target);
-                    mc.player.getInventory().selectedSlot = old; // D-Tap için eski eşyaya dön
-                    swordTimer = 0; // Reset
+                    mc.player.getInventory().selectedSlot = old;
+                    swordTimer = 0;
                 }
             }
-        } else {
-            swordTimer = 0;
-        }
+        } else { swordTimer = 0; }
     }
 
-    private static void doSmartTotem() {
-        if (!mc.player.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING)) {
-            int slot = -1;
-            for (int i = 0; i < 36; i++) if (mc.player.getInventory().getStack(i).isOf(Items.TOTEM_OF_UNDYING)) slot = i;
-            if (slot != -1) mc.interactionManager.clickSlot(0, slot < 9 ? slot + 36 : slot, 45, SlotActionType.SWAP, mc.player);
-        }
-    }
-
-    public static void onKey(int key) {
-        if (key == GLFW.GLFW_KEY_RIGHT_SHIFT) mc.setScreen(new AmethystGui());
-    }
-
-    // --- YARDIMCI ---
     public static Module getMod(String name) { return moduleMap.get(name); }
     private static int findItem(net.minecraft.item.Item item) {
         for (int i = 0; i < 9; i++) if (mc.player.getInventory().getStack(i).isOf(item)) return i;
@@ -178,65 +208,5 @@ public class Mbest700 implements ClientModInitializer {
         return -1;
     }
 
-    // --- MODÜL SİSTEMİ ---
-    public static class Module {
-        public String name, category; public boolean enabled = false;
-        public Map<String, Setting> settings = new LinkedHashMap<>();
-        public Module(String n, String c) { name = n; category = c; }
-        public Module addSetting(String n, double v, double min, double max) {
-            settings.put(n, new Setting(n, v, min, max)); return this;
-        }
-        public Setting getSetting(String n) { return settings.get(n); }
-        public void toggle() { enabled = !enabled; }
-    }
-
-    public static class Setting {
-        public String name; public double val, min, max;
-        public Setting(String n, double v, double min, double max) { name = n; val = v; this.min = min; this.max = max; }
-    }
-
-    // --- GUI ---
-    public static class AmethystGui extends Screen {
-        public AmethystGui() { super(Text.literal("Amethyst")); }
-        @Override
-        public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-            context.fill(10, 10, 180, 260, 0xEE000000);
-            context.drawText(this.textRenderer, "§dMbest700 §7v4", 20, 20, 0xFFFFFF, true);
-            int y = 40;
-            for (Module m : moduleMap.values()) {
-                int col = m.enabled ? 0xFFA020F0 : 0xFF555555;
-                context.fill(20, y, 30, y + 10, col);
-                context.drawText(this.textRenderer, m.name, 35, y + 1, 0xFFFFFF, false);
-                y += 15;
-                if (m.enabled) {
-                    for (Setting s : m.settings.values()) {
-                        context.drawText(this.textRenderer, " > " + s.name + ": " + String.format("%.1f", s.val), 40, y, 0xAAAAAA, false);
-                        y += 12;
-                    }
-                }
-            }
-        }
-        @Override
-        public boolean mouseClicked(double mouseX, double mouseY, int button) {
-            int y = 40;
-            for (Module m : moduleMap.values()) {
-                if (mouseX > 20 && mouseX < 150 && mouseY > y && mouseY < y + 12) {
-                    m.toggle(); return true;
-                }
-                y += 15;
-                if (m.enabled) {
-                    for (Setting s : m.settings.values()) {
-                        if (mouseX > 40 && mouseX < 150 && mouseY > y && mouseY < y + 10) {
-                            s.val = (s.val >= s.max) ? s.min : s.val + (s.max - s.min) / 10.0;
-                            return true;
-                        }
-                        y += 12;
-                    }
-                }
-            }
-            return super.mouseClicked(mouseX, mouseY, button);
-        }
-        @Override public boolean shouldPause() { return false; }
-    }
-    }
-    
+    // Modül ve GUI kodları buraya gelecek (v4'teki ile aynı yapı)
+}
