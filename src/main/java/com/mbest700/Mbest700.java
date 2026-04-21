@@ -26,7 +26,7 @@ public class Mbest700 implements ClientModInitializer {
     private static long shieldTimer, xpTimer, crystalTimer, anchorTimer, pearlTimer = 0;
     private static int anchorStep = -1;
     private static BlockPos targetAnchorPos = null;
-    private static boolean waitingForKey = false; // Tuş atama kontrolü
+    private static boolean waitingForKey = false;
 
     @Override
     public void onInitializeClient() {
@@ -34,15 +34,15 @@ public class Mbest700 implements ClientModInitializer {
     }
 
     public static void init() {
-        addMod(new Module("AutoCrystal", "Sag tikla kristal koyar ve patlatir.")
+        addMod(new Module("AutoCrystal", "Sag tikla kristal koyar/patlatir.")
             .addSetting("Speed", 20.0, 1.0, 50.0));
-        addMod(new Module("AutoAnchor", "V tusuyla Anchor patlatir.")
+        addMod(new Module("AutoAnchor", "V tusuyla Anchor patlatir (Tick gecikmeli).")
             .addSetting("Delay", 30.0, 5.0, 200.0));
-        addMod(new Module("ShieldCracker", "Kalkan kullananlarin kalkanini dusurur."));
-        addMod(new Module("FastXP", "XP sisesini cok seri firlatir.")
+        addMod(new Module("ShieldCracker", "Kalkan dusurur."));
+        addMod(new Module("FastXP", "Seri XP firlatir.")
             .addSetting("Speed", 20.0, 1.0, 20.0));
-        addMod(new Module("PrePearl", "Tek tusla inci atar ve geri doner.")
-            .addSetting("PearlKey", (double) GLFW.GLFW_KEY_Z, 0, 1000)); // Varsayılan Z
+        addMod(new Module("PrePearl", "Ozel tusla inci atar.")
+            .addSetting("PearlKey", (double) GLFW.GLFW_KEY_Z, 0, 1000));
     }
 
     private static void addMod(Module m) { moduleMap.put(m.name, m); }
@@ -71,18 +71,19 @@ public class Mbest700 implements ClientModInitializer {
         BlockHitResult bhr = new BlockHitResult(center, net.minecraft.util.math.Direction.UP, targetAnchorPos, false);
 
         switch (anchorStep) {
-            case 0: // Koyma
+            case 0:
                 mc.player.getInventory().selectedSlot = anc;
                 mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bhr);
                 anchorTimer = now; anchorStep = 1; break;
-            case 1: // Doldurma
+            case 1:
                 if (now - anchorTimer >= delay) {
                     mc.player.getInventory().selectedSlot = glow;
                     mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bhr);
                     anchorTimer = now; anchorStep = 2;
                 } break;
-            case 2: // Patlatma (Tick eklendi)
-                if (now - anchorTimer >= delay + 50) { // +50ms ek gecikme
+            case 2:
+                // Patlatma oncesi +50ms tick eklemesi
+                if (now - anchorTimer >= delay + 50) {
                     mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bhr);
                     anchorStep = -1; targetAnchorPos = null;
                 } break;
@@ -90,7 +91,7 @@ public class Mbest700 implements ClientModInitializer {
     }
 
     private static void doAutoCrystal() {
-        // Sadece elinde kristal varken çalışır
+        // Sadece elimizde kristal varken calisir
         if (!mc.options.useKey.isPressed() || !mc.player.getMainHandStack().isOf(Items.END_CRYSTAL)) return; 
         
         double speed = getMod("AutoCrystal").getSetting("Speed").val;
@@ -101,60 +102,73 @@ public class Mbest700 implements ClientModInitializer {
             mc.player.swingHand(Hand.MAIN_HAND);
             crystalTimer = System.currentTimeMillis();
         } else if (mc.crosshairTarget instanceof BlockHitResult bhr) {
-            // Hangi face'e (yüzeye) bakıyorsak oraya koy (Side/Up farketmez)
+            // Obsidyenin neresine bakarsan bak koyar
             mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bhr);
             crystalTimer = System.currentTimeMillis();
         }
     }
 
+    private static void doShieldCracker() {
+        if (System.currentTimeMillis() - shieldTimer < 250) return;
+        for (Entity e : mc.world.getEntities()) {
+            if (e instanceof PlayerEntity target && target != mc.player && target.isBlocking()) {
+                int axe = findAxe();
+                if (axe != -1 && mc.player.distanceTo(target) < 4.0) {
+                    int oldSlot = mc.player.getInventory().selectedSlot;
+                    mc.player.getInventory().selectedSlot = axe;
+                    mc.interactionManager.attackEntity(mc.player, target);
+                    mc.player.swingHand(Hand.MAIN_HAND);
+                    mc.player.getInventory().selectedSlot = oldSlot;
+                    shieldTimer = System.currentTimeMillis();
+                }
+            }
+        }
+    }
+
+    private static void doFastXP() {
+        if (mc.options.useKey.isPressed() && mc.player.getMainHandStack().isOf(Items.EXPERIENCE_BOTTLE)) {
+            if (System.currentTimeMillis() - xpTimer >= (1000 / getMod("FastXP").getSetting("Speed").val)) {
+                mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
+                xpTimer = System.currentTimeMillis();
+            }
+        }
+    }
+
     private static void doPrePearl() {
         if (System.currentTimeMillis() - pearlTimer < 500) return;
-        int pearlSlot = findItemHotbar(Items.ENDER_PEARL);
-        if (pearlSlot != -1) {
-            int oldSlot = mc.player.getInventory().selectedSlot;
-            mc.player.getInventory().selectedSlot = pearlSlot;
+        int pSlot = findItemHotbar(Items.ENDER_PEARL);
+        if (pSlot != -1) {
+            int old = mc.player.getInventory().selectedSlot;
+            mc.player.getInventory().selectedSlot = pSlot;
             mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
-            
-            new Timer().schedule(new TimerTask() {
-                @Override public void run() { mc.player.getInventory().selectedSlot = oldSlot; }
-            }, 50);
-            
+            new Timer().schedule(new TimerTask() { @Override public void run() { mc.player.getInventory().selectedSlot = old; }}, 50);
             pearlTimer = System.currentTimeMillis();
         }
     }
 
     public static void onKey(int key) {
-        // Tuş Atama Bekleniyorsa
         if (waitingForKey && key != GLFW.GLFW_KEY_UNKNOWN) {
             getMod("PrePearl").getSetting("PearlKey").val = (double) key;
             waitingForKey = false;
             return;
         }
-
         if (key == GLFW.GLFW_KEY_RIGHT_SHIFT) mc.setScreen(new AmethystGui());
-        
-        // AutoAnchor Tetikleyici
         if (key == GLFW.GLFW_KEY_V && anchorStep == -1) {
             if (getMod("AutoAnchor").enabled && mc.crosshairTarget instanceof BlockHitResult bhr) {
                 targetAnchorPos = bhr.getBlockPos();
                 anchorStep = 0;
             }
         }
-
-        // PrePearl Tetikleyici
-        if (getMod("PrePearl").enabled && key == (int) getMod("PrePearl").getSetting("PearlKey").val) {
-            doPrePearl();
-        }
+        if (getMod("PrePearl").enabled && key == (int) getMod("PrePearl").getSetting("PearlKey").val) doPrePearl();
     }
 
     public static class AmethystGui extends Screen {
         private String selectedMod = "";
         public AmethystGui() { super(Text.literal("Amethyst")); }
-
         @Override
         public void render(DrawContext context, int mouseX, int mouseY, float delta) {
             context.fill(10, 10, 245, 310, 0xEE050505);
-            context.drawText(this.textRenderer, "§dMbest700 §fV31", 20, 20, 0xFFFFFF, true);
+            context.drawText(this.textRenderer, "§dMbest700 §fV32", 20, 20, 0xFFFFFF, true);
             int y = 45;
             for (Module m : moduleMap.values()) {
                 context.fill(20, y, 24, y + 10, m.enabled ? 0xFF9933FF : 0xFF444444);
@@ -164,14 +178,13 @@ public class Mbest700 implements ClientModInitializer {
                     context.drawText(this.textRenderer, "§7" + m.info, 40, y, 0xAAAAAA, false);
                     for (Setting s : m.settings.values()) {
                         y += 15;
-                        String displayVal = s.name.equals("PearlKey") ? (waitingForKey ? "§cPress Key..." : "§b" + GLFW.glfwGetKeyName((int)s.val, 0)) : "§b" + String.format("%.1f", s.val);
-                        context.drawText(this.textRenderer, "  " + s.name + ": " + displayVal, 40, y, 0xCCCCCC, false);
+                        String val = s.name.equals("PearlKey") ? (waitingForKey ? "§c[...]" : "§b" + GLFW.glfwGetKeyName((int)s.val, 0)) : "§b" + String.format("%.1f", s.val);
+                        context.drawText(this.textRenderer, "  " + s.name + ": " + val, 40, y, 0xCCCCCC, false);
                     }
                 }
                 y += 18;
             }
         }
-
         @Override
         public boolean mouseClicked(double mouseX, double mouseY, int button) {
             int y = 45;
@@ -185,11 +198,8 @@ public class Mbest700 implements ClientModInitializer {
                     for (Setting s : m.settings.values()) {
                         y += 15;
                         if (mouseX > 40 && mouseX < 180 && mouseY > y && mouseY < y + 12) {
-                            if (s.name.equals("PearlKey")) { waitingForKey = true; } // Tuş atama modu
-                            else {
-                                if (button == 0) s.val = Math.min(s.max, s.val + 1);
-                                else s.val = Math.max(s.min, s.val - 1);
-                            }
+                            if (s.name.equals("PearlKey")) waitingForKey = true;
+                            else { if (button == 0) s.val = Math.min(s.max, s.val + 1); else s.val = Math.max(s.min, s.val - 1); }
                             return true;
                         }
                     }
@@ -200,31 +210,17 @@ public class Mbest700 implements ClientModInitializer {
         }
     }
 
-    // --- Yardımcı Metotlar ---
-    private static int findItemHotbar(net.minecraft.item.Item item) {
-        for (int i = 0; i < 9; i++) if (mc.player.getInventory().getStack(i).isOf(item)) return i;
-        return -1;
-    }
-    private static int findAxe() {
-        for (int i = 0; i < 9; i++) if (mc.player.getInventory().getStack(i).getItem() instanceof AxeItem) return i;
-        return -1;
-    }
-    private static float[] getRotations(Vec3d target) {
-        Vec3d diff = target.subtract(mc.player.getEyePos());
-        double diffXZ = Math.sqrt(diff.x * diff.x + diff.z * diff.z);
-        return new float[]{(float) Math.toDegrees(Math.atan2(diff.z, diff.x)) - 90F, (float) -Math.toDegrees(Math.atan2(diff.y, diffXZ))};
-    }
+    private static int findItemHotbar(net.minecraft.item.Item i) { for (int j = 0; j < 9; j++) if (mc.player.getInventory().getStack(j).isOf(i)) return j; return -1; }
+    private static int findAxe() { for (int i = 0; i < 9; i++) if (mc.player.getInventory().getStack(i).getItem() instanceof AxeItem) return i; return -1; }
+    private static float[] getRotations(Vec3d t) { Vec3d d = t.subtract(mc.player.getEyePos()); double dXZ = Math.sqrt(d.x * d.x + d.z * d.z); return new float[]{(float) Math.toDegrees(Math.atan2(d.z, d.x)) - 90F, (float) -Math.toDegrees(Math.atan2(d.y, dXZ))}; }
     public static Module getMod(String name) { return moduleMap.get(name); }
     public static class Module {
-        public String name, info; public boolean enabled = false;
-        public Map<String, Setting> settings = new LinkedHashMap<>();
+        public String name, info; public boolean enabled = false; public Map<String, Setting> settings = new LinkedHashMap<>();
         public Module(String n, String i) { name = n; info = i; }
         public Module addSetting(String n, double v, double min, double max) { settings.put(n, new Setting(n, v, min, max)); return this; }
         public Setting getSetting(String n) { return settings.get(n); }
         public void toggle() { enabled = !enabled; }
     }
-    public static class Setting {
-        public String name; public double val, min, max;
-        public Setting(String n, double v, double min, double max) { name = n; val = v; this.min = min; this.max = max; }
-    }
-}
+    public static class Setting { public String name; public double val, min, max; public Setting(String n, double v, double min, double max) { name = n; val = v; this.min = min; this.max = max; } }
+                                                                  }
+                                                                  
