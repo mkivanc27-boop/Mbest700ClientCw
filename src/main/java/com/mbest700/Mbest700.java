@@ -36,8 +36,7 @@ public class Mbest700 implements ClientModInitializer {
     public static void init() {
         addMod(new Module("AutoCrystal", "Sag tikla kristal koyar/patlatir.")
             .addSetting("Speed", 20.0, 1.0, 50.0));
-        addMod(new Module("AutoAnchor", "V tusuyla Anchor patlatir (Tick gecikmeli).")
-            .addSetting("Delay", 30.0, 5.0, 200.0));
+        addMod(new Module("AutoAnchor", "V tusuyla 3-tick gecikmeli Anchor patlatir."));
         addMod(new Module("ShieldCracker", "Kalkan dusurur."));
         addMod(new Module("FastXP", "Seri XP firlatir.")
             .addSetting("Speed", 20.0, 1.0, 20.0));
@@ -64,36 +63,43 @@ public class Mbest700 implements ClientModInitializer {
 
         int anc = findItemHotbar(Items.RESPAWN_ANCHOR);
         int glow = findItemHotbar(Items.GLOWSTONE);
+        int totem = findItemHotbar(Items.TOTEM_OF_UNDYING);
+
         if (anc == -1 || glow == -1) { anchorStep = -1; return; }
 
         long now = System.currentTimeMillis();
-        double delay = getMod("AutoAnchor").getSetting("Delay").val;
+        long tickDelay = 150; // 3 Tick (Her tick 50ms)
         BlockHitResult bhr = new BlockHitResult(center, net.minecraft.util.math.Direction.UP, targetAnchorPos, false);
 
         switch (anchorStep) {
-            case 0:
+            case 0: // 1. Adım: Anchor Koy
                 mc.player.getInventory().selectedSlot = anc;
                 mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bhr);
-                anchorTimer = now; anchorStep = 1; break;
-            case 1:
-                if (now - anchorTimer >= delay) {
+                anchorTimer = now; 
+                anchorStep = 1; 
+                break;
+            case 1: // 2. Adım: 3 Tick Sonra Glowstone Koy
+                if (now - anchorTimer >= tickDelay) {
                     mc.player.getInventory().selectedSlot = glow;
                     mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bhr);
-                    anchorTimer = now; anchorStep = 2;
+                    anchorTimer = now; 
+                    anchorStep = 2;
                 } break;
-            case 2:
-                // Patlatma oncesi +50ms tick eklemesi
-                if (now - anchorTimer >= delay + 50) {
+            case 2: // 3. Adım: 3 Tick Sonra Patlat
+                if (now - anchorTimer >= tickDelay) {
+                    // Totem varsa ona geç, yoksa Anchor'a geri dön
+                    if (totem != -1) mc.player.getInventory().selectedSlot = totem;
+                    else mc.player.getInventory().selectedSlot = anc;
+                    
                     mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bhr);
-                    anchorStep = -1; targetAnchorPos = null;
+                    anchorStep = -1; 
+                    targetAnchorPos = null;
                 } break;
         }
     }
 
     private static void doAutoCrystal() {
-        // Sadece elimizde kristal varken calisir
         if (!mc.options.useKey.isPressed() || !mc.player.getMainHandStack().isOf(Items.END_CRYSTAL)) return; 
-        
         double speed = getMod("AutoCrystal").getSetting("Speed").val;
         if (System.currentTimeMillis() - crystalTimer < (1000 / speed)) return;
 
@@ -102,7 +108,6 @@ public class Mbest700 implements ClientModInitializer {
             mc.player.swingHand(Hand.MAIN_HAND);
             crystalTimer = System.currentTimeMillis();
         } else if (mc.crosshairTarget instanceof BlockHitResult bhr) {
-            // Obsidyenin neresine bakarsan bak koyar
             mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, bhr);
             crystalTimer = System.currentTimeMillis();
         }
@@ -168,7 +173,7 @@ public class Mbest700 implements ClientModInitializer {
         @Override
         public void render(DrawContext context, int mouseX, int mouseY, float delta) {
             context.fill(10, 10, 245, 310, 0xEE050505);
-            context.drawText(this.textRenderer, "§dMbest700 §fV32", 20, 20, 0xFFFFFF, true);
+            context.drawText(this.textRenderer, "§dMbest700 §fV33", 20, 20, 0xFFFFFF, true);
             int y = 45;
             for (Module m : moduleMap.values()) {
                 context.fill(20, y, 24, y + 10, m.enabled ? 0xFF9933FF : 0xFF444444);
@@ -222,5 +227,5 @@ public class Mbest700 implements ClientModInitializer {
         public void toggle() { enabled = !enabled; }
     }
     public static class Setting { public String name; public double val, min, max; public Setting(String n, double v, double min, double max) { name = n; val = v; this.min = min; this.max = max; } }
-                                                                  }
-                                                                  
+            }
+                
